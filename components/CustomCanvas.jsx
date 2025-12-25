@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Rnd } from 'react-rnd';
 
 const FONTS = [
@@ -19,9 +19,22 @@ const SHAPES = [
 ];
 
 const PRESET_KEY = 'MENU_CUSTOM_PRESETS_V1';
-const SNAP_THRESHOLD = 8;
 
-export default function CustomCanvas({ items = [], onChangeItems, onSave, onCancel, editing = false }) {
+const SNAP_THRESHOLD = 8;
+const INSPECTOR_AUTOHIDE_MS = 5000;
+
+export default function CustomCanvas({
+  items = [],
+  onChangeItems,
+  onSave,
+  onCancel,
+  editing = false,
+  lang = 'ko',
+  inspectorTop = 118,
+  // ✅ NEW: Preview 상태를 부모(MenuEditor)로 알림
+  onPreviewChange,
+}) {
+  const t = useMemo(() => getTexts(lang), [lang]);
   const incomingItems = useMemo(() => (Array.isArray(items) ? items : []), [items]);
 
   const [draft, setDraft] = useState(incomingItems);
@@ -44,25 +57,56 @@ export default function CustomCanvas({ items = [], onChangeItems, onSave, onCanc
 
   // ✅ 프리셋
   const [presets, setPresets] = useState([]);
+  const [presetSelectedId, setPresetSelectedId] = useState('');
+
+  // ✅ Inspector 표시/자동숨김
+  const [inspectorVisible, setInspectorVisible] = useState(true);
+  const hideTimerRef = useRef(null);
+  const hideReasonRef = useRef(null); // 'select'면 자동숨김, 'add'면 유지
+
+  // ✅ 툴바 숨김/표시
+  const [toolbarVisible, setToolbarVisible] = useState(true);
+
+  // ✅ 미리보기 모드
+  const [preview, setPreview] = useState(false);
+
+  // ✅ 멀티 드래그 이동용 (대표 하나를 드래그할 때, 나머지 선택된 요소들도 같이 이동)
+  const dragAnchorRef = useRef(null); // { id, startX, startY, snapshot: [{id,x,y,w,h}] }
 
   const selected = useMemo(
     () => safeItems.find((it) => it.id === selectedId) || null,
     [safeItems, selectedId]
   );
 
+  const isEdit = !!editing;
+
+  // -----------------------------
+  // Presets load
+  // -----------------------------
   useEffect(() => {
     setPresets(loadPresets());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ 보기모드로 바뀌면: 드래그 상태/선택 정리 (편집 UI 없으니까)
+  // ✅ 편집모드 아니면 모든 UI OFF
   useEffect(() => {
     if (!editing) {
       setIsDragging(false);
       setSelectedIds([]);
+      setInspectorVisible(false);
+      clearInspectorHideTimer();
+      hideReasonRef.current = null;
+
+      setPreview(false);
+      onPreviewChange?.(false); // ✅ 부모에도 알림
+      setToolbarVisible(true);
+    } else {
+      setInspectorVisible(true);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing]);
 
-  // ✅ 핵심: 편집 중(dirty)에는 부모 items로 덮어쓰기 금지
+  // ✅ 편집 중(dirty)에는 부모 items로 덮어쓰기 금지
   useEffect(() => {
     if (dirty) return;
     setDraft(incomingItems);
@@ -98,6 +142,36 @@ export default function CustomCanvas({ items = [], onChangeItems, onSave, onCanc
   const newId = () => (crypto.randomUUID?.() || String(Date.now() + Math.random()));
 
   // -----------------------------
+  // Inspector helpers
+  // -----------------------------
+  const clearInspectorHideTimer = () => {
+    if (hideTimerRef.current) {
+      clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = null;
+    }
+  };
+
+  const showInspectorBySelect = () => {
+    if (preview) return; // ✅ 미리보기면 속성 안 띄움
+    setInspectorVisible(true);
+    hideReasonRef.current = 'select';
+    clearInspectorHideTimer();
+    hideTimerRef.current = setTimeout(() => {
+      if (hideReasonRef.current === 'select') {
+        setInspectorVisible(false);
+        setSelectedIds([]);
+      }
+    }, INSPECTOR_AUTOHIDE_MS);
+  };
+
+  const showInspectorByAdd = () => {
+    if (preview) return;
+    setInspectorVisible(true);
+    hideReasonRef.current = 'add';
+    clearInspectorHideTimer();
+  };
+
+  // -----------------------------
   // Adders
   // -----------------------------
   const addFoodName = () => {
@@ -112,7 +186,7 @@ export default function CustomCanvas({ items = [], onChangeItems, onSave, onCanc
         y: 80,
         w: 520,
         h: 90,
-        text: '음식 이름',
+        text: t.foodNameDefault,
         fontFamily: FONTS[0].value,
         size: 52,
         color: '#ffffff',
@@ -127,6 +201,7 @@ export default function CustomCanvas({ items = [], onChangeItems, onSave, onCanc
     ];
     commit(next);
     setSelectedIds([id]);
+    showInspectorByAdd();
   };
 
   const addPrice = () => {
@@ -141,7 +216,7 @@ export default function CustomCanvas({ items = [], onChangeItems, onSave, onCanc
         y: 180,
         w: 320,
         h: 70,
-        text: '₩9,900',
+        text: t.priceDefault,
         fontFamily: FONTS[0].value,
         size: 46,
         color: '#ffffff',
@@ -156,6 +231,7 @@ export default function CustomCanvas({ items = [], onChangeItems, onSave, onCanc
     ];
     commit(next);
     setSelectedIds([id]);
+    showInspectorByAdd();
   };
 
   const addPhoto = async (file) => {
@@ -183,19 +259,18 @@ export default function CustomCanvas({ items = [], onChangeItems, onSave, onCanc
     ];
     commit(next);
     setSelectedIds([id]);
+    showInspectorByAdd();
   };
 
   // -----------------------------
   // Selection
   // -----------------------------
-  const toggleSelect = (id, additive) => {
-    setSelectedIds((prev) => {
-      if (!additive) return [id];
-      if (prev.includes(id)) return prev.filter((x) => x !== id);
-      return [...prev, id];
-    });
+  const clearSelect = () => {
+    setSelectedIds([]);
+    clearInspectorHideTimer();
+    hideReasonRef.current = null;
+    setInspectorVisible(false);
   };
-  const clearSelect = () => setSelectedIds([]);
 
   // -----------------------------
   // Save / Cancel
@@ -210,16 +285,21 @@ export default function CustomCanvas({ items = [], onChangeItems, onSave, onCanc
     setDraft(origin);
     setDirty(false);
     setSelectedIds([]);
+    clearInspectorHideTimer();
+    hideReasonRef.current = null;
+    setInspectorVisible(true);
     onCancel?.(origin);
   };
 
   // -----------------------------
-  // Keyboard (편집모드에서만!)
+  // Keyboard
   // -----------------------------
   useEffect(() => {
     if (!editing) return;
 
     const onKey = (e) => {
+      if (preview) return; // ✅ 미리보기에서는 키보드 편집 차단
+
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedIds.length) {
         e.preventDefault();
         removeMany(selectedIds);
@@ -245,7 +325,7 @@ export default function CustomCanvas({ items = [], onChangeItems, onSave, onCanc
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editing, selectedIds, safeItems, origin]);
+  }, [editing, selectedIds, safeItems, origin, preview]);
 
   // -----------------------------
   // Move / Snap
@@ -261,7 +341,8 @@ export default function CustomCanvas({ items = [], onChangeItems, onSave, onCanc
   };
 
   const applySnap = (movingId, x, y, w, h) => {
-    let nx = x, ny = y;
+    let nx = x;
+    let ny = y;
 
     if (gridOn) {
       nx = Math.round(nx / gridSize) * gridSize;
@@ -359,6 +440,7 @@ export default function CustomCanvas({ items = [], onChangeItems, onSave, onCanc
     }));
     commit([...safeItems, ...copies]);
     setSelectedIds(copies.map((c) => c.id));
+    showInspectorByAdd();
   };
 
   // -----------------------------
@@ -370,7 +452,6 @@ export default function CustomCanvas({ items = [], onChangeItems, onSave, onCanc
     const minX = Math.min(...sel.map((it) => it.x));
     updateMany(selectedIds, { x: minX });
   };
-
   const alignRight = () => {
     if (selectedIds.length < 2) return;
     const sel = safeItems.filter((it) => selectedIds.includes(it.id));
@@ -382,11 +463,11 @@ export default function CustomCanvas({ items = [], onChangeItems, onSave, onCanc
     });
     commit(next);
   };
-
   const alignCenter = () => {
     if (selectedIds.length < 2) return;
     const sel = safeItems.filter((it) => selectedIds.includes(it.id));
-    const center = (Math.min(...sel.map((it) => it.x)) + Math.max(...sel.map((it) => it.x + it.w))) / 2;
+    const center =
+      (Math.min(...sel.map((it) => it.x)) + Math.max(...sel.map((it) => it.x + it.w))) / 2;
     const set = new Set(selectedIds);
     const next = safeItems.map((it) => {
       if (!set.has(it.id) || it.locked) return it;
@@ -394,14 +475,12 @@ export default function CustomCanvas({ items = [], onChangeItems, onSave, onCanc
     });
     commit(next);
   };
-
   const alignTop = () => {
     if (selectedIds.length < 2) return;
     const sel = safeItems.filter((it) => selectedIds.includes(it.id));
     const minY = Math.min(...sel.map((it) => it.y));
     updateMany(selectedIds, { y: minY });
   };
-
   const alignBottom = () => {
     if (selectedIds.length < 2) return;
     const sel = safeItems.filter((it) => selectedIds.includes(it.id));
@@ -413,11 +492,11 @@ export default function CustomCanvas({ items = [], onChangeItems, onSave, onCanc
     });
     commit(next);
   };
-
   const alignMiddle = () => {
     if (selectedIds.length < 2) return;
     const sel = safeItems.filter((it) => selectedIds.includes(it.id));
-    const mid = (Math.min(...sel.map((it) => it.y)) + Math.max(...sel.map((it) => it.y + it.h))) / 2;
+    const mid =
+      (Math.min(...sel.map((it) => it.y)) + Math.max(...sel.map((it) => it.y + it.h))) / 2;
     const set = new Set(selectedIds);
     const next = safeItems.map((it) => {
       if (!set.has(it.id) || it.locked) return it;
@@ -430,137 +509,277 @@ export default function CustomCanvas({ items = [], onChangeItems, onSave, onCanc
   // Presets
   // -----------------------------
   const savePreset = () => {
-    const name = prompt('프리셋 이름을 입력하세요', '내 메뉴 프리셋');
+    const name = prompt(t.presetNamePrompt, t.presetNameDefault);
     if (!name) return;
+
     const all = loadPresets();
     all.push({ id: newId(), name, createdAt: Date.now(), items: safeItems });
     persistPresets(all);
     setPresets(all);
-    alert('프리셋 저장 완료!');
+    alert(t.presetSavedAlert);
   };
 
   const loadPreset = (presetId) => {
     const all = loadPresets();
     const p = all.find((x) => x.id === presetId);
     if (!p) return;
+
     const remapped = p.items.map((it) => ({ ...it, id: newId() }));
     commit(remapped);
+
     setSelectedIds([]);
+    setPresetSelectedId(presetId);
+
+    setInspectorVisible(true);
+    hideReasonRef.current = 'add';
+    clearInspectorHideTimer();
   };
 
-  // ✅ 프리셋 삭제 (버튼 복구)
-  const deletePresetByName = () => {
-    const name = prompt('삭제할 프리셋 이름을 정확히 입력하세요');
-    if (!name) return;
-    const p = presets.find((x) => x.name === name);
-    if (!p) return alert('해당 이름의 프리셋이 없어요.');
-    if (!confirm(`"${p.name}" 프리셋을 삭제할까요?`)) return;
+  const deletePreset = () => {
+    const id = presetSelectedId;
+    if (!id) {
+      alert(t.pickPresetFirst);
+      return;
+    }
 
-    const next = loadPresets().filter((x) => x.id !== p.id);
+    const all = loadPresets();
+    const p = all.find((x) => x.id === id);
+    if (!p) return;
+
+    const ok = confirm(`${t.deletePresetConfirm}\n\n- ${p.name}`);
+    if (!ok) return;
+
+    const next = all.filter((x) => x.id !== id);
     persistPresets(next);
     setPresets(next);
+
+    // ✅ 선택도 초기화
+    setPresetSelectedId('');
+    alert(t.presetDeletedAlert);
   };
 
-  // ✅ 보기모드: 아이템만 렌더(툴/UI 숨김 + Rnd 비활성화)
-  const isEdit = !!editing;
+  // -----------------------------
+  // Preview
+  // -----------------------------
+  const enterPreview = () => {
+    setPreview(true);
+    onPreviewChange?.(true); // ✅ 부모(MenuEditor)에게 preview on 알림
+
+    setInspectorVisible(false);
+    setSelectedIds([]);
+    clearInspectorHideTimer();
+    hideReasonRef.current = null;
+  };
+
+  const exitPreview = () => {
+    setPreview(false);
+    onPreviewChange?.(false); // ✅ 부모에게 preview off 알림
+    setInspectorVisible(true);
+  };
+
+  // -----------------------------
+  // Multi-drag helpers
+  // -----------------------------
+  const beginMultiDrag = (activeId) => {
+    const snapshot = safeItems
+      .filter((it) => selectedIds.includes(it.id))
+      .map((it) => ({ id: it.id, x: it.x, y: it.y, w: it.w, h: it.h, locked: !!it.locked }));
+    const active = safeItems.find((it) => it.id === activeId);
+    dragAnchorRef.current = {
+      id: activeId,
+      startX: active?.x ?? 0,
+      startY: active?.y ?? 0,
+      snapshot,
+    };
+  };
+
+  const applyMultiDragStop = (activeId, newX, newY) => {
+    const anchor = dragAnchorRef.current;
+    dragAnchorRef.current = null;
+
+    if (!anchor || anchor.id !== activeId) {
+      // fallback: 단일 처리
+      const it = safeItems.find((x) => x.id === activeId);
+      if (!it) return;
+      const { x: sx, y: sy } = applySnap(activeId, newX, newY, it.w, it.h);
+      updateItem(activeId, { x: sx, y: sy });
+      return;
+    }
+
+    // active의 이동량
+    const dx = newX - anchor.startX;
+    const dy = newY - anchor.startY;
+
+    const set = new Set(selectedIds);
+    const next = safeItems.map((it) => {
+      if (!set.has(it.id)) return it;
+      if (it.locked) return it;
+
+      const snapBase = anchor.snapshot.find((s) => s.id === it.id);
+      if (!snapBase) return it;
+
+      let nx = snapBase.x + dx;
+      let ny = snapBase.y + dy;
+
+      // ✅ 그룹 이동 시에도 grid는 적용
+      if (gridOn) {
+        nx = Math.round(nx / gridSize) * gridSize;
+        ny = Math.round(ny / gridSize) * gridSize;
+      }
+
+      return { ...it, x: nx, y: ny };
+    });
+
+    // ✅ 스냅은 active에만 적용 (머리만 기준으로 맞추고 나머지는 상대 유지)
+    const activeItem = safeItems.find((x) => x.id === activeId);
+    if (activeItem) {
+      const activeSnapBase = anchor.snapshot.find((s) => s.id === activeId);
+      if (activeSnapBase) {
+        const ax = activeSnapBase.x + dx;
+        const ay = activeSnapBase.y + dy;
+        const { x: sx, y: sy } = applySnap(activeId, ax, ay, activeItem.w, activeItem.h);
+        const fixDx = sx - ax;
+        const fixDy = sy - ay;
+
+        const next2 = next.map((it) => {
+          if (!set.has(it.id)) return it;
+          if (it.locked) return it;
+          return { ...it, x: it.x + fixDx, y: it.y + fixDy };
+        });
+
+        commit(next2);
+        return;
+      }
+    }
+
+    commit(next);
+  };
 
   // -----------------------------
   // UI
   // -----------------------------
   return (
     <>
-      {/* ✅ 편집모드에서만 Toolbar */}
-      {isEdit && (
-        <div
-          style={styles.toolbar}
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button style={styles.toolBtn} onClick={addFoodName}>+ 음식이름</button>
-          <button style={styles.toolBtn} onClick={addPrice}>+ 가격</button>
+      {/* ✅ 미리보기 모드: 우하단에 [뒤로가기][저장]만 */}
+      {isEdit && preview && (
+        <div style={styles.previewBar} onMouseDown={(e) => e.stopPropagation()}>
+          <button style={styles.cancelBtn} onClick={exitPreview}>{t.backFromPreview}</button>
+          <button style={styles.saveBtn} onClick={doSave}>{t.save}</button>
+        </div>
+      )}
 
-          <label style={{ ...styles.toolBtn, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-            + 사진
-            <input
-              type="file"
-              accept="image/*"
-              style={{ display: 'none' }}
-              onChange={(e) => addPhoto(e.target.files?.[0])}
-            />
-          </label>
-
-          <span style={styles.sep} />
-
-          <label style={styles.chk}>
-            <input type="checkbox" checked={snapOn} onChange={(e) => setSnapOn(e.target.checked)} />
-            Snap
-          </label>
-
-          <label style={styles.chk}>
-            <input type="checkbox" checked={gridOn} onChange={(e) => setGridOn(e.target.checked)} />
-            Grid
-          </label>
-
-          {gridOn && (
-            <input
-              type="number"
-              min={4}
-              max={100}
-              value={gridSize}
-              onChange={(e) => setGridSize(Number(e.target.value || 10))}
-              style={styles.gridNum}
-              title="Grid Size"
-            />
-          )}
-
-          <span style={styles.sep} />
-
-          <button style={styles.toolBtnSm} onClick={savePreset}>Save Preset</button>
-
-          <select
-            defaultValue=""
-            onChange={(e) => {
-              if (e.target.value) loadPreset(e.target.value);
-              e.target.value = '';
-            }}
-            style={styles.presetSelect}
-          >
-            <option value="">Load Preset…</option>
-            {presets.map((p) => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
-          </select>
-
-          {/* ✅ 프리셋 삭제 버튼 복구 */}
-          {presets.length > 0 && (
-            <button style={styles.toolBtnSm} onClick={deletePresetByName}>
-              Delete Preset
+      {/* ✅ 편집모드 + 미리보기 아니면: 툴바 */}
+      {isEdit && !preview && (
+        <>
+          {/* 툴바가 숨겨졌을 때: 다시 열기 버튼 */}
+          {!toolbarVisible && (
+            <button
+              style={styles.toolsOpenBtn}
+              onClick={() => setToolbarVisible(true)}
+            >
+              {t.openTools}
             </button>
           )}
 
-          <span style={{ fontWeight: 900, fontSize: 12, opacity: 0.9 }}>
-            {dirty ? '● Editing (Not Saved)' : 'Saved'}
-          </span>
-        </div>
+          {toolbarVisible && (
+            <div style={styles.toolbarFixed} onMouseDown={(e) => e.stopPropagation()}>
+              <div style={styles.toolbarRow}>
+                <button style={styles.toolBtn} onClick={addFoodName}>{t.addName}</button>
+                <button style={styles.toolBtn} onClick={addPrice}>{t.addPrice}</button>
+
+                <label style={{ ...styles.toolBtn, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  {t.addPhoto}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    style={{ display: 'none' }}
+                    onChange={(e) => addPhoto(e.target.files?.[0])}
+                  />
+                </label>
+
+                <span style={styles.sep} />
+
+                <label style={styles.chk}>
+                  <input type="checkbox" checked={snapOn} onChange={(e) => setSnapOn(e.target.checked)} />
+                  {t.snap}
+                </label>
+
+                <label style={styles.chk}>
+                  <input type="checkbox" checked={gridOn} onChange={(e) => setGridOn(e.target.checked)} />
+                  {t.grid}
+                </label>
+
+                {gridOn && (
+                  <input
+                    type="number"
+                    min={4}
+                    max={100}
+                    value={gridSize}
+                    onChange={(e) => setGridSize(Number(e.target.value || 10))}
+                    style={styles.gridNum}
+                    title="Grid Size"
+                  />
+                )}
+
+                <span style={styles.sep} />
+
+                <button style={styles.toolBtnSm} onClick={savePreset}>{t.savePreset}</button>
+
+                <select
+                  value={presetSelectedId}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setPresetSelectedId(v);
+                    if (v) loadPreset(v);
+                  }}
+                  style={styles.presetSelect}
+                >
+                  <option value="">{t.loadPreset}</option>
+                  {presets.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+
+                <button style={styles.toolBtnSm} onClick={deletePreset}>
+                  {t.deletePreset}
+                </button>
+
+                <span style={{ fontWeight: 900, fontSize: 12, opacity: 0.9 }}>
+                  {dirty ? t.editingNotSaved : t.saved}
+                </span>
+
+                {/* ✅ 미리보기 버튼 */}
+                <button style={styles.previewBtn} onClick={enterPreview}>
+                  {t.preview}
+                </button>
+
+                {/* ✅ 툴바 숨김(X) */}
+                <button
+                  style={styles.toolbarCloseBtn}
+                  onClick={() => setToolbarVisible(false)}
+                  aria-label="close-toolbar"
+                  title={t.hideTools}
+                >
+                  ×
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ✅ 편집모드 + 미리보기 아니면: SAVE/CANCEL */}
+          <div style={styles.saveBar} onMouseDown={(e) => e.stopPropagation()}>
+            <button style={styles.saveBtn} onClick={doSave}>{t.save}</button>
+            <button style={styles.cancelBtn} onClick={doCancel}>{t.cancel}</button>
+          </div>
+        </>
       )}
 
-      {/* ✅ 편집모드에서만 SAVE / CANCEL */}
-      {isEdit && (
-        <div
-          style={styles.saveBar}
-          onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button style={styles.saveBtn} onClick={doSave}>SAVE</button>
-          <button style={styles.cancelBtn} onClick={doCancel}>CANCEL</button>
-        </div>
-      )}
-
-      {/* Canvas (보기모드에서도 렌더) */}
+      {/* Canvas */}
       <div
         style={styles.layer}
         onClick={(e) => {
           if (!isEdit) return;
+          if (preview) return;
           if (e.target === e.currentTarget && !isDragging) clearSelect();
         }}
       >
@@ -577,80 +796,110 @@ export default function CustomCanvas({ items = [], onChangeItems, onSave, onCanc
                 bounds="parent"
                 size={{ width: it.w, height: it.h }}
                 position={{ x: it.x, y: it.y }}
-                disableDragging={!isEdit || isLocked}
-                enableResizing={!isEdit ? false : (isLocked ? false : undefined)}
+                // ✅ 미리보기에서는 전부 고정
+                disableDragging={!isEdit || isLocked || preview}
+                enableResizing={!isEdit ? false : (isLocked || preview ? false : undefined)}
                 onMouseDown={(e) => {
                   if (!isEdit) return;
+                  if (preview) return;
+
                   e.stopPropagation();
-                  toggleSelect(it.id, e.shiftKey);
+
+                  setSelectedIds((prev) => {
+                    if (!e.shiftKey) return [it.id];
+                    if (prev.includes(it.id)) return prev.filter((x) => x !== it.id);
+                    return [...prev, it.id];
+                  });
+
+                  showInspectorBySelect();
                 }}
-                onDragStart={() => isEdit && setIsDragging(true)}
-                onResizeStart={() => isEdit && setIsDragging(true)}
+                onDragStart={() => {
+                  if (!isEdit || preview) return;
+                  setIsDragging(true);
+
+                  // ✅ 멀티선택인 경우, 대표 드래그 시작 시 스냅샷 저장
+                  if (selectedIds.length >= 2 && selectedIds.includes(it.id)) {
+                    beginMultiDrag(it.id);
+                  } else {
+                    dragAnchorRef.current = null;
+                  }
+                }}
+                onResizeStart={() => isEdit && !preview && setIsDragging(true)}
                 onDragStop={(e, d) => {
-                  if (!isEdit) return;
+                  if (!isEdit || preview) return;
                   setIsDragging(false);
                   if (isLocked) return;
+
+                  // ✅ 멀티선택이면 같이 이동
+                  if (selectedIds.length >= 2 && selectedIds.includes(it.id)) {
+                    applyMultiDragStop(it.id, d.x, d.y);
+                    return;
+                  }
+
+                  // 단일 이동
                   const { x: sx, y: sy } = applySnap(it.id, d.x, d.y, it.w, it.h);
                   updateItem(it.id, { x: sx, y: sy });
                 }}
                 onResizeStop={(e, dir, ref, delta, pos) => {
-                  if (!isEdit) return;
+                  if (!isEdit || preview) return;
                   setIsDragging(false);
                   if (isLocked) return;
+
                   const w = ref.offsetWidth;
                   const h = ref.offsetHeight;
+
                   const { x: sx, y: sy } = applySnap(it.id, pos.x, pos.y, w, h);
                   updateItem(it.id, { w, h, x: sx, y: sy });
                 }}
                 style={{ zIndex: it.z || 0 }}
               >
-                <ItemBox item={it} selected={isEdit && isSelected} />
+                <ItemBox item={it} selected={isEdit && isSelected && !preview} />
               </Rnd>
             );
           })}
       </div>
 
-      {/* ✅ 편집모드에서만 Inspector */}
-      {isEdit && (
+      {/* ✅ Inspector: 편집 + 미리보기X + inspectorVisible */}
+      {isEdit && !preview && inspectorVisible && (
         <div
-          style={styles.inspector}
+          style={{ ...styles.inspector, top: inspectorTop }}
           onMouseDown={(e) => e.stopPropagation()}
-          onClick={(e) => e.stopPropagation()}
         >
-          <div style={styles.inspectorTitle}>속성</div>
+          <div style={styles.inspectorTitle}>{t.inspectorTitle}</div>
 
-          {/* 멀티 선택 퀵 액션 */}
           {selectedIds.length >= 2 && (
             <div style={styles.multiBox}>
-              <div style={{ fontWeight: 900, marginBottom: 8 }}>선택: {selectedIds.length}개</div>
-
-              <div style={styles.multiGrid}>
-                <button style={styles.actionBtn} onClick={alignLeft}>Left</button>
-                <button style={styles.actionBtn} onClick={alignCenter}>Center</button>
-                <button style={styles.actionBtn} onClick={alignRight}>Right</button>
-                <button style={styles.actionBtn} onClick={alignTop}>Top</button>
-                <button style={styles.actionBtn} onClick={alignMiddle}>Middle</button>
-                <button style={styles.actionBtn} onClick={alignBottom}>Bottom</button>
+              <div style={{ fontWeight: 900, marginBottom: 8 }}>
+                {t.selectedCount.replace('{n}', String(selectedIds.length))}
               </div>
 
               <div style={styles.multiGrid}>
-                <button style={styles.actionBtn} onClick={groupSelected}>Group</button>
-                <button style={styles.actionBtn} onClick={ungroupSelected}>Ungroup</button>
-                <button style={styles.actionBtn} onClick={duplicateSelected}>Duplicate</button>
-                <button style={styles.actionBtn} onClick={bringForward}>Bring +</button>
-                <button style={styles.actionBtn} onClick={sendBackward}>Send -</button>
-                <button style={styles.actionBtn} onClick={lockSelected}>Lock</button>
-                <button style={styles.actionBtn} onClick={unlockSelected}>Unlock</button>
+                <button style={styles.actionBtn} onClick={alignLeft}>{t.left}</button>
+                <button style={styles.actionBtn} onClick={alignCenter}>{t.center}</button>
+                <button style={styles.actionBtn} onClick={alignRight}>{t.right}</button>
+                <button style={styles.actionBtn} onClick={alignTop}>{t.top}</button>
+                <button style={styles.actionBtn} onClick={alignMiddle}>{t.middle}</button>
+                <button style={styles.actionBtn} onClick={alignBottom}>{t.bottom}</button>
+              </div>
+
+              <div style={styles.multiGrid}>
+                <button style={styles.actionBtn} onClick={groupSelected}>{t.group}</button>
+                <button style={styles.actionBtn} onClick={ungroupSelected}>{t.ungroup}</button>
+                <button style={styles.actionBtn} onClick={duplicateSelected}>{t.duplicate}</button>
+                <button style={styles.actionBtn} onClick={bringForward}>{t.bring}</button>
+                <button style={styles.actionBtn} onClick={sendBackward}>{t.send}</button>
+                <button style={styles.actionBtn} onClick={lockSelected}>{t.lock}</button>
+                <button style={styles.actionBtn} onClick={unlockSelected}>{t.unlock}</button>
                 <button
                   style={{ ...styles.actionBtn, background: '#ffefef', borderColor: '#ffb7b7' }}
                   onClick={() => removeMany(selectedIds)}
                 >
-                  Delete
+                  {t.delete}
                 </button>
               </div>
 
               <div style={{ fontSize: 12, opacity: 0.75, marginTop: 6 }}>
-                * Shift+클릭 다중선택 · 방향키 이동(Shift는 10px) · Delete 삭제
+                {t.multiHint}
               </div>
 
               <hr style={{ margin: '12px 0', border: 'none', borderTop: '1px solid #eee' }} />
@@ -658,38 +907,37 @@ export default function CustomCanvas({ items = [], onChangeItems, onSave, onCanc
           )}
 
           {!selected ? (
-            <div style={{ fontSize: 13, opacity: 0.8 }}>
-              요소를 클릭하면 속성이 계속 표시돼요.
-              <div style={{ marginTop: 8, fontSize: 12, opacity: 0.7 }}>
-                - Shift+클릭: 다중 선택<br />
-                - Delete: 삭제<br />
-                - 방향키: 이동 (Shift는 빠르게)
+            <div style={{ fontSize: 13, opacity: 0.85, lineHeight: 1.5 }}>
+              {t.inspectorHelpTitle}
+              <div style={{ marginTop: 10, opacity: 0.9 }}>
+                {t.inspectorHelpLines.map((line, idx) => (
+                  <div key={idx}>{line}</div>
+                ))}
               </div>
             </div>
           ) : (
             <>
               <div style={styles.row}>
-                <div style={styles.label}>Type</div>
+                <div style={styles.label}>{t.type}</div>
                 <div style={styles.value}>
                   {selected.type === 'text'
-                    ? (selected.role === 'price' ? 'Text (Price)' : 'Text (Name)')
-                    : 'Photo'}
+                    ? (selected.role === 'price' ? t.textPrice : t.textName)
+                    : t.photo}
                 </div>
               </div>
 
               <div style={styles.row}>
-                <div style={styles.label}>Locked</div>
+                <div style={styles.label}>{t.locked}</div>
                 <button
                   style={toggleBtn(!!selected.locked)}
                   onClick={() => updateItem(selected.id, { locked: !selected.locked })}
                 >
-                  {selected.locked ? 'Locked' : 'Unlocked'}
+                  {selected.locked ? t.lockedOn : t.lockedOff}
                 </button>
               </div>
 
-              {/* 공통: 투명도 */}
               <div style={styles.row}>
-                <div style={styles.label}>Opacity</div>
+                <div style={styles.label}>{t.opacity}</div>
                 <input
                   type="range"
                   min="0"
@@ -701,11 +949,10 @@ export default function CustomCanvas({ items = [], onChangeItems, onSave, onCanc
                 />
               </div>
 
-              {/* 텍스트 */}
               {selected.type === 'text' && (
                 <>
                   <div style={styles.rowCol}>
-                    <div style={styles.label}>Text</div>
+                    <div style={styles.label}>{t.text}</div>
                     <input
                       value={selected.text || ''}
                       onChange={(e) => updateItem(selected.id, { text: e.target.value })}
@@ -715,7 +962,7 @@ export default function CustomCanvas({ items = [], onChangeItems, onSave, onCanc
                   </div>
 
                   <div style={styles.row}>
-                    <div style={styles.label}>Font</div>
+                    <div style={styles.label}>{t.font}</div>
                     <select
                       value={selected.fontFamily || FONTS[0].value}
                       onChange={(e) => updateItem(selected.id, { fontFamily: e.target.value })}
@@ -729,7 +976,7 @@ export default function CustomCanvas({ items = [], onChangeItems, onSave, onCanc
                   </div>
 
                   <div style={styles.row}>
-                    <div style={styles.label}>Size</div>
+                    <div style={styles.label}>{t.size}</div>
                     <input
                       type="number"
                       value={selected.size || 36}
@@ -742,7 +989,7 @@ export default function CustomCanvas({ items = [], onChangeItems, onSave, onCanc
                   </div>
 
                   <div style={styles.row}>
-                    <div style={styles.label}>Color</div>
+                    <div style={styles.label}>{t.color}</div>
                     <input
                       type="color"
                       value={selected.color || '#ffffff'}
@@ -753,59 +1000,58 @@ export default function CustomCanvas({ items = [], onChangeItems, onSave, onCanc
                   </div>
 
                   <div style={styles.row}>
-                    <div style={styles.label}>Style</div>
+                    <div style={styles.label}>{t.style}</div>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button
                         style={toggleBtn(!!selected.bold)}
                         onClick={() => updateItem(selected.id, { bold: !selected.bold })}
                         disabled={selected.locked}
                       >
-                        Bold
+                        {t.bold}
                       </button>
                       <button
                         style={toggleBtn(!!selected.italic)}
                         onClick={() => updateItem(selected.id, { italic: !selected.italic })}
                         disabled={selected.locked}
                       >
-                        Italic
+                        {t.italic}
                       </button>
                     </div>
                   </div>
 
                   <div style={styles.row}>
-                    <div style={styles.label}>Align</div>
+                    <div style={styles.label}>{t.align}</div>
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button
                         style={toggleBtn((selected.align || 'left') === 'left')}
                         onClick={() => updateItem(selected.id, { align: 'left' })}
                         disabled={selected.locked}
                       >
-                        Left
+                        {t.left}
                       </button>
                       <button
                         style={toggleBtn((selected.align || 'left') === 'center')}
                         onClick={() => updateItem(selected.id, { align: 'center' })}
                         disabled={selected.locked}
                       >
-                        Center
+                        {t.center}
                       </button>
                       <button
                         style={toggleBtn((selected.align || 'left') === 'right')}
                         onClick={() => updateItem(selected.id, { align: 'right' })}
                         disabled={selected.locked}
                       >
-                        Right
+                        {t.right}
                       </button>
                     </div>
                   </div>
                 </>
               )}
 
-              {/* 사진 */}
               {selected.type === 'image' && (
                 <>
                   <div style={styles.row}>
-                    <div style={styles.label}>Shape</div>
+                    <div style={styles.label}>{t.shape}</div>
                     <select
                       value={selected.shape || 'rounded'}
                       onChange={(e) => updateItem(selected.id, { shape: e.target.value })}
@@ -820,7 +1066,7 @@ export default function CustomCanvas({ items = [], onChangeItems, onSave, onCanc
 
                   {selected.shape === 'rounded' && (
                     <div style={styles.row}>
-                      <div style={styles.label}>Radius</div>
+                      <div style={styles.label}>{t.radius}</div>
                       <input
                         type="number"
                         value={selected.radius ?? 18}
@@ -834,32 +1080,31 @@ export default function CustomCanvas({ items = [], onChangeItems, onSave, onCanc
                   )}
 
                   <div style={styles.row}>
-                    <div style={styles.label}>Fit</div>
+                    <div style={styles.label}>{t.fit}</div>
                     <select
                       value={selected.fit || 'contain'}
                       onChange={(e) => updateItem(selected.id, { fit: e.target.value })}
                       style={styles.select}
                       disabled={selected.locked}
                     >
-                      <option value="contain">Contain (전체 보이게)</option>
-                      <option value="cover">Cover (꽉 채우기)</option>
+                      <option value="contain">{t.fitContain}</option>
+                      <option value="cover">{t.fitCover}</option>
                     </select>
                   </div>
                 </>
               )}
 
-              {/* 단일 선택 액션 */}
               <div style={styles.actions}>
-                <button style={styles.actionBtn} onClick={duplicateSelected}>Duplicate</button>
-                <button style={styles.actionBtn} onClick={bringForward}>Bring +</button>
-                <button style={styles.actionBtn} onClick={sendBackward}>Send -</button>
-                <button style={styles.actionBtn} onClick={() => updateItem(selected.id, { locked: true })}>Lock</button>
-                <button style={styles.actionBtn} onClick={() => updateItem(selected.id, { locked: false })}>Unlock</button>
+                <button style={styles.actionBtn} onClick={duplicateSelected}>{t.duplicate}</button>
+                <button style={styles.actionBtn} onClick={bringForward}>{t.bring}</button>
+                <button style={styles.actionBtn} onClick={sendBackward}>{t.send}</button>
+                <button style={styles.actionBtn} onClick={() => updateItem(selected.id, { locked: true })}>{t.lock}</button>
+                <button style={styles.actionBtn} onClick={() => updateItem(selected.id, { locked: false })}>{t.unlock}</button>
                 <button
                   style={{ ...styles.actionBtn, background: '#ffefef', borderColor: '#ffb7b7' }}
                   onClick={() => removeMany([selected.id])}
                 >
-                  Delete
+                  {t.delete}
                 </button>
               </div>
             </>
@@ -996,22 +1241,192 @@ function fileToDataUrl(file) {
   });
 }
 
+function getTexts(lang) {
+  const ko = {
+    addName: '+ 음식이름',
+    addPrice: '+ 가격',
+    addPhoto: '+ 사진',
+    snap: 'Snap',
+    grid: 'Grid',
+    savePreset: '프리셋 저장',
+    loadPreset: '프리셋 불러오기…',
+    deletePreset: '프리셋 삭제',
+    editingNotSaved: '● Editing (Not Saved)',
+    saved: 'Saved',
+    save: '저장',
+    cancel: '취소',
+
+    preview: '미리보기',
+    backFromPreview: '뒤로가기',
+    openTools: '도구 열기',
+    hideTools: '도구 숨기기',
+
+    presetNamePrompt: '프리셋 이름을 입력하세요',
+    presetNameDefault: '내 메뉴 프리셋',
+    presetSavedAlert: '프리셋 저장 완료!',
+    presetDeletedAlert: '프리셋 삭제 완료!',
+    pickPresetFirst: '삭제할 프리셋을 먼저 선택하세요.',
+    deletePresetConfirm: '선택한 프리셋을 삭제할까요?',
+
+    inspectorTitle: '속성',
+    inspectorHelpTitle: '속성 요소를 클릭하면 속성이 계속 표시돼요.',
+    inspectorHelpLines: [
+      '- Shift+클릭: 다중 선택',
+      '- Delete: 삭제',
+      '- 방향키: 이동 (Shift는 빠르게)',
+    ],
+    selectedCount: '선택: {n}개',
+    multiHint: '* Shift+클릭 다중선택 · 방향키 이동(Shift는 10px) · Delete 삭제',
+
+    type: 'Type',
+    textName: 'Text (Name)',
+    textPrice: 'Text (Price)',
+    photo: 'Photo',
+
+    locked: 'Locked',
+    lockedOn: 'Locked',
+    lockedOff: 'Unlocked',
+
+    opacity: 'Opacity',
+    text: 'Text',
+    font: 'Font',
+    size: 'Size',
+    color: 'Color',
+    style: 'Style',
+    bold: 'Bold',
+    italic: 'Italic',
+    align: 'Align',
+
+    shape: 'Shape',
+    radius: 'Radius',
+    fit: 'Fit',
+    fitContain: 'Contain (전체 보이게)',
+    fitCover: 'Cover (꽉 채우기)',
+
+    left: 'Left',
+    center: 'Center',
+    right: 'Right',
+    top: 'Top',
+    middle: 'Middle',
+    bottom: 'Bottom',
+
+    group: 'Group',
+    ungroup: 'Ungroup',
+    duplicate: 'Duplicate',
+    bring: 'Bring +',
+    send: 'Send -',
+    lock: 'Lock',
+    unlock: 'Unlock',
+    delete: 'Delete',
+
+    foodNameDefault: '음식 이름',
+    priceDefault: '$9.99',
+  };
+
+  const en = {
+    addName: '+ Name',
+    addPrice: '+ Price',
+    addPhoto: '+ Photo',
+    snap: 'Snap',
+    grid: 'Grid',
+    savePreset: 'Save Preset',
+    loadPreset: 'Load Preset…',
+    deletePreset: 'Delete Preset',
+    editingNotSaved: '● Editing (Not Saved)',
+    saved: 'Saved',
+    save: 'Save',
+    cancel: 'Cancel',
+
+    preview: 'Preview',
+    backFromPreview: 'Back',
+    openTools: 'Show Tools',
+    hideTools: 'Hide Tools',
+
+    presetNamePrompt: 'Enter preset name',
+    presetNameDefault: 'My Menu Preset',
+    presetSavedAlert: 'Preset saved!',
+    presetDeletedAlert: 'Preset deleted!',
+    pickPresetFirst: 'Pick a preset to delete first.',
+    deletePresetConfirm: 'Delete selected preset?',
+
+    inspectorTitle: 'Properties',
+    inspectorHelpTitle: 'Click an item to keep properties visible.',
+    inspectorHelpLines: [
+      '- Shift+Click: multi-select',
+      '- Delete: remove',
+      '- Arrow keys: move (Shift = faster)',
+    ],
+    selectedCount: 'Selected: {n}',
+    multiHint: '* Shift+Click multi · Arrow keys move (Shift = 10px) · Delete remove',
+
+    type: 'Type',
+    textName: 'Text (Name)',
+    textPrice: 'Text (Price)',
+    photo: 'Photo',
+
+    locked: 'Locked',
+    lockedOn: 'Locked',
+    lockedOff: 'Unlocked',
+
+    opacity: 'Opacity',
+    text: 'Text',
+    font: 'Font',
+    size: 'Size',
+    color: 'Color',
+    style: 'Style',
+    bold: 'Bold',
+    italic: 'Italic',
+    align: 'Align',
+
+    shape: 'Shape',
+    radius: 'Radius',
+    fit: 'Fit',
+    fitContain: 'Contain',
+    fitCover: 'Cover',
+
+    left: 'Left',
+    center: 'Center',
+    right: 'Right',
+    top: 'Top',
+    middle: 'Middle',
+    bottom: 'Bottom',
+
+    group: 'Group',
+    ungroup: 'Ungroup',
+    duplicate: 'Duplicate',
+    bring: 'Bring +',
+    send: 'Send -',
+    lock: 'Lock',
+    unlock: 'Unlock',
+    delete: 'Delete',
+
+    foodNameDefault: 'Item Name',
+    priceDefault: '$9.99',
+  };
+
+  return lang === 'en' ? en : ko;
+}
+
 const styles = {
-  toolbar: {
-    position: 'absolute',
+  // ✅ 툴바: 좌상단 고정
+  toolbarFixed: {
+    position: 'fixed',
     left: 16,
-    top: 64,
-    zIndex: 9998,
+    top: 16,
+    zIndex: 9999,
     pointerEvents: 'auto',
-    display: 'flex',
-    gap: 10,
-    flexWrap: 'wrap',
-    alignItems: 'center',
     background: 'rgba(0,0,0,0.55)',
     color: '#fff',
     padding: '10px 12px',
     borderRadius: 14,
     backdropFilter: 'blur(6px)',
+    maxWidth: 'calc(100vw - 32px)',
+  },
+  toolbarRow: {
+    display: 'flex',
+    gap: 10,
+    flexWrap: 'wrap',
+    alignItems: 'center',
   },
   toolBtn: {
     padding: '10px 12px',
@@ -1027,13 +1442,57 @@ const styles = {
     cursor: 'pointer',
     fontWeight: 900,
   },
+  previewBtn: {
+    padding: '8px 10px',
+    borderRadius: 10,
+    border: '1px solid rgba(255,255,255,0.35)',
+    cursor: 'pointer',
+    fontWeight: 900,
+    background: 'rgba(255,255,255,0.12)',
+    color: '#fff',
+  },
+  toolbarCloseBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    border: '1px solid rgba(255,255,255,0.28)',
+    background: 'rgba(255,255,255,0.10)',
+    color: '#fff',
+    fontSize: 22,
+    lineHeight: '30px',
+    cursor: 'pointer',
+    fontWeight: 900,
+  },
+  toolsOpenBtn: {
+    position: 'fixed',
+    left: 16,
+    top: 16,
+    zIndex: 9999,
+    padding: '10px 12px',
+    borderRadius: 12,
+    border: 'none',
+    cursor: 'pointer',
+    fontWeight: 900,
+  },
+
   chk: { display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 12, fontWeight: 800 },
   gridNum: { width: 70, padding: '8px 8px', borderRadius: 10, border: 'none', fontWeight: 900 },
   presetSelect: { padding: '8px 10px', borderRadius: 10, border: 'none', fontWeight: 900 },
   sep: { width: 1, height: 20, background: 'rgba(255,255,255,0.25)', margin: '0 4px' },
 
+  // ✅ 미리보기에서만 보이는 바
+  previewBar: {
+    position: 'fixed',
+    right: 16,
+    bottom: 16,
+    zIndex: 9999,
+    pointerEvents: 'auto',
+    display: 'flex',
+    gap: 10,
+  },
+
   saveBar: {
-    position: 'absolute',
+    position: 'fixed',
     right: 16,
     bottom: 16,
     zIndex: 9999,
@@ -1080,8 +1539,7 @@ const styles = {
   },
 
   inspector: {
-    position: 'absolute',
-    top: 64,
+    position: 'fixed',
     right: 16,
     zIndex: 9998,
     pointerEvents: 'auto',

@@ -74,15 +74,25 @@ export default function IntroPlayer() {
     }
   };
 
+  // ✅ 끝나면 메뉴로 가지 말고 다시 재생(루프 보강)
+  const handleEnded = async () => {
+    const v = videoRef.current;
+    if (!v) return;
+
+    try {
+      v.currentTime = 0;
+      await v.play();
+    } catch (e) {
+      // 일부 브라우저에서 autoplay 정책 때문에 실패할 수 있음
+      console.log('Loop replay blocked:', e);
+    }
+  };
+
   return (
     <div style={styles.container}>
       {!videoUrl ? (
         <div style={styles.uploadBox}>
-          <input
-            type="file"
-            accept="video/*"
-            onChange={(e) => upload(e.target.files[0])}
-          />
+          <input type="file" accept="video/*" onChange={(e) => upload(e.target.files?.[0])} />
         </div>
       ) : (
         <>
@@ -93,7 +103,8 @@ export default function IntroPlayer() {
             autoPlay
             muted={muted}
             playsInline
-            onEnded={goMenu}
+            loop // ✅ 기본 루프
+            onEnded={handleEnded} // ✅ 루프가 안 먹는 환경 대비 보강
             style={styles.video}
           />
 
@@ -103,8 +114,9 @@ export default function IntroPlayer() {
               {muted ? 'Sound On' : 'Sound Off'}
             </button>
 
-            <button onClick={goMenu} style={styles.skipBtn}>
-              SKIP
+            {/* ✅ SKIP 대신 Go to Menu */}
+            <button onClick={goMenu} style={styles.menuBtn}>
+              Go to Menu
             </button>
           </div>
         </>
@@ -148,7 +160,7 @@ const styles = {
     fontWeight: 700,
     background: 'rgba(255,255,255,0.9)',
   },
-  skipBtn: {
+  menuBtn: {
     padding: '10px 14px',
     borderRadius: 999,
     border: 'none',
