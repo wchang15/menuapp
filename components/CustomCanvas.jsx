@@ -19,9 +19,12 @@ const SHAPES = [
 ];
 
 const PRESET_KEY = 'MENU_CUSTOM_PRESETS_V1';
-
 const SNAP_THRESHOLD = 8;
 const INSPECTOR_AUTOHIDE_MS = 5000;
+
+// ✅ 드래그 중 자동 스크롤
+const AUTO_SCROLL_ZONE = 80;
+const AUTO_SCROLL_SPEED = 18;
 
 export default function CustomCanvas({
   items = [],
@@ -31,8 +34,12 @@ export default function CustomCanvas({
   editing = false,
   lang = 'ko',
   inspectorTop = 118,
-  // ✅ NEW: Preview 상태를 부모(MenuEditor)로 알림
-  onPreviewChange,
+
+  // ✅ NEW: 'edit' | 'preview'
+  uiMode = 'edit',
+
+  // ✅ MenuEditor stage scroll ref
+  scrollRef,
 }) {
   const t = useMemo(() => getTexts(lang), [lang]);
   const incomingItems = useMemo(() => (Array.isArray(items) ? items : []), [items]);
@@ -47,7 +54,7 @@ export default function CustomCanvas({
   const [selectedIds, setSelectedIds] = useState([]);
   const selectedId = selectedIds[0] || null;
 
-  // ✅ 드래그 중에 빈공간 클릭으로 선택 풀리는 것 방지
+  // ✅ 드래그 중 선택 풀림 방지
   const [isDragging, setIsDragging] = useState(false);
 
   // ✅ 스냅/그리드
@@ -62,16 +69,13 @@ export default function CustomCanvas({
   // ✅ Inspector 표시/자동숨김
   const [inspectorVisible, setInspectorVisible] = useState(true);
   const hideTimerRef = useRef(null);
-  const hideReasonRef = useRef(null); // 'select'면 자동숨김, 'add'면 유지
+  const hideReasonRef = useRef(null); // 'select' | 'add'
 
   // ✅ 툴바 숨김/표시
   const [toolbarVisible, setToolbarVisible] = useState(true);
 
-  // ✅ 미리보기 모드
-  const [preview, setPreview] = useState(false);
-
-  // ✅ 멀티 드래그 이동용 (대표 하나를 드래그할 때, 나머지 선택된 요소들도 같이 이동)
-  const dragAnchorRef = useRef(null); // { id, startX, startY, snapshot: [{id,x,y,w,h}] }
+  // ✅ 멀티 드래그 이동용
+  const dragAnchorRef = useRef(null);
 
   const selected = useMemo(
     () => safeItems.find((it) => it.id === selectedId) || null,
@@ -79,6 +83,7 @@ export default function CustomCanvas({
   );
 
   const isEdit = !!editing;
+  const isPreview = uiMode === 'preview';
 
   // -----------------------------
   // Presets load
@@ -88,7 +93,7 @@ export default function CustomCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ 편집모드 아니면 모든 UI OFF
+  // ✅ 편집모드 아니면 UI OFF (하지만 draft는 유지됨)
   useEffect(() => {
     if (!editing) {
       setIsDragging(false);
@@ -96,15 +101,29 @@ export default function CustomCanvas({
       setInspectorVisible(false);
       clearInspectorHideTimer();
       hideReasonRef.current = null;
-
-      setPreview(false);
-      onPreviewChange?.(false); // ✅ 부모에도 알림
       setToolbarVisible(true);
     } else {
       setInspectorVisible(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing]);
+
+  // ✅ preview 모드 들어가면 UI 싹 숨김(선택/인스펙터/툴바)
+  useEffect(() => {
+    if (isPreview) {
+      setSelectedIds([]);
+      setInspectorVisible(false);
+      clearInspectorHideTimer();
+      hideReasonRef.current = null;
+      setToolbarVisible(false);
+    } else {
+      if (editing) {
+        setInspectorVisible(true);
+        setToolbarVisible(true);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPreview]);
 
   // ✅ 편집 중(dirty)에는 부모 items로 덮어쓰기 금지
   useEffect(() => {
@@ -142,6 +161,28 @@ export default function CustomCanvas({
   const newId = () => (crypto.randomUUID?.() || String(Date.now() + Math.random()));
 
   // -----------------------------
+  // ✅ Drag auto-scroll (iPad)
+  // -----------------------------
+  const autoScrollWhileDrag = (evt) => {
+    const sc = scrollRef?.current;
+    if (!sc) return;
+
+    const clientY =
+      evt?.touches?.[0]?.clientY ??
+      evt?.changedTouches?.[0]?.clientY ??
+      evt?.clientY;
+
+    if (typeof clientY !== 'number') return;
+
+    const rect = sc.getBoundingClientRect();
+    const topZone = rect.top + AUTO_SCROLL_ZONE;
+    const bottomZone = rect.bottom - AUTO_SCROLL_ZONE;
+
+    if (clientY < topZone) sc.scrollTop -= AUTO_SCROLL_SPEED;
+    else if (clientY > bottomZone) sc.scrollTop += AUTO_SCROLL_SPEED;
+  };
+
+  // -----------------------------
   // Inspector helpers
   // -----------------------------
   const clearInspectorHideTimer = () => {
@@ -152,7 +193,7 @@ export default function CustomCanvas({
   };
 
   const showInspectorBySelect = () => {
-    if (preview) return; // ✅ 미리보기면 속성 안 띄움
+    if (isPreview) return;
     setInspectorVisible(true);
     hideReasonRef.current = 'select';
     clearInspectorHideTimer();
@@ -165,7 +206,7 @@ export default function CustomCanvas({
   };
 
   const showInspectorByAdd = () => {
-    if (preview) return;
+    if (isPreview) return;
     setInspectorVisible(true);
     hideReasonRef.current = 'add';
     clearInspectorHideTimer();
@@ -175,6 +216,7 @@ export default function CustomCanvas({
   // Adders
   // -----------------------------
   const addFoodName = () => {
+    if (isPreview) return;
     const id = newId();
     const next = [
       ...safeItems,
@@ -205,6 +247,7 @@ export default function CustomCanvas({
   };
 
   const addPrice = () => {
+    if (isPreview) return;
     const id = newId();
     const next = [
       ...safeItems,
@@ -235,6 +278,7 @@ export default function CustomCanvas({
   };
 
   const addPhoto = async (file) => {
+    if (isPreview) return;
     if (!file) return;
     const src = await fileToDataUrl(file);
     const id = newId();
@@ -296,10 +340,9 @@ export default function CustomCanvas({
   // -----------------------------
   useEffect(() => {
     if (!editing) return;
+    if (isPreview) return;
 
     const onKey = (e) => {
-      if (preview) return; // ✅ 미리보기에서는 키보드 편집 차단
-
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedIds.length) {
         e.preventDefault();
         removeMany(selectedIds);
@@ -325,7 +368,7 @@ export default function CustomCanvas({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editing, selectedIds, safeItems, origin, preview]);
+  }, [editing, selectedIds, safeItems, origin, isPreview]);
 
   // -----------------------------
   // Move / Snap
@@ -466,8 +509,7 @@ export default function CustomCanvas({
   const alignCenter = () => {
     if (selectedIds.length < 2) return;
     const sel = safeItems.filter((it) => selectedIds.includes(it.id));
-    const center =
-      (Math.min(...sel.map((it) => it.x)) + Math.max(...sel.map((it) => it.x + it.w))) / 2;
+    const center = (Math.min(...sel.map((it) => it.x)) + Math.max(...sel.map((it) => it.x + it.w))) / 2;
     const set = new Set(selectedIds);
     const next = safeItems.map((it) => {
       if (!set.has(it.id) || it.locked) return it;
@@ -495,8 +537,7 @@ export default function CustomCanvas({
   const alignMiddle = () => {
     if (selectedIds.length < 2) return;
     const sel = safeItems.filter((it) => selectedIds.includes(it.id));
-    const mid =
-      (Math.min(...sel.map((it) => it.y)) + Math.max(...sel.map((it) => it.y + it.h))) / 2;
+    const mid = (Math.min(...sel.map((it) => it.y)) + Math.max(...sel.map((it) => it.y + it.h))) / 2;
     const set = new Set(selectedIds);
     const next = safeItems.map((it) => {
       if (!set.has(it.id) || it.locked) return it;
@@ -509,6 +550,7 @@ export default function CustomCanvas({
   // Presets
   // -----------------------------
   const savePreset = () => {
+    if (isPreview) return;
     const name = prompt(t.presetNamePrompt, t.presetNameDefault);
     if (!name) return;
 
@@ -520,6 +562,7 @@ export default function CustomCanvas({
   };
 
   const loadPreset = (presetId) => {
+    if (isPreview) return;
     const all = loadPresets();
     const p = all.find((x) => x.id === presetId);
     if (!p) return;
@@ -536,6 +579,7 @@ export default function CustomCanvas({
   };
 
   const deletePreset = () => {
+    if (isPreview) return;
     const id = presetSelectedId;
     if (!id) {
       alert(t.pickPresetFirst);
@@ -553,28 +597,8 @@ export default function CustomCanvas({
     persistPresets(next);
     setPresets(next);
 
-    // ✅ 선택도 초기화
     setPresetSelectedId('');
     alert(t.presetDeletedAlert);
-  };
-
-  // -----------------------------
-  // Preview
-  // -----------------------------
-  const enterPreview = () => {
-    setPreview(true);
-    onPreviewChange?.(true); // ✅ 부모(MenuEditor)에게 preview on 알림
-
-    setInspectorVisible(false);
-    setSelectedIds([]);
-    clearInspectorHideTimer();
-    hideReasonRef.current = null;
-  };
-
-  const exitPreview = () => {
-    setPreview(false);
-    onPreviewChange?.(false); // ✅ 부모에게 preview off 알림
-    setInspectorVisible(true);
   };
 
   // -----------------------------
@@ -598,7 +622,6 @@ export default function CustomCanvas({
     dragAnchorRef.current = null;
 
     if (!anchor || anchor.id !== activeId) {
-      // fallback: 단일 처리
       const it = safeItems.find((x) => x.id === activeId);
       if (!it) return;
       const { x: sx, y: sy } = applySnap(activeId, newX, newY, it.w, it.h);
@@ -606,7 +629,6 @@ export default function CustomCanvas({
       return;
     }
 
-    // active의 이동량
     const dx = newX - anchor.startX;
     const dy = newY - anchor.startY;
 
@@ -621,7 +643,6 @@ export default function CustomCanvas({
       let nx = snapBase.x + dx;
       let ny = snapBase.y + dy;
 
-      // ✅ 그룹 이동 시에도 grid는 적용
       if (gridOn) {
         nx = Math.round(nx / gridSize) * gridSize;
         ny = Math.round(ny / gridSize) * gridSize;
@@ -630,7 +651,6 @@ export default function CustomCanvas({
       return { ...it, x: nx, y: ny };
     });
 
-    // ✅ 스냅은 active에만 적용 (머리만 기준으로 맞추고 나머지는 상대 유지)
     const activeItem = safeItems.find((x) => x.id === activeId);
     if (activeItem) {
       const activeSnapBase = anchor.snapshot.find((s) => s.id === activeId);
@@ -660,18 +680,9 @@ export default function CustomCanvas({
   // -----------------------------
   return (
     <>
-      {/* ✅ 미리보기 모드: 우하단에 [뒤로가기][저장]만 */}
-      {isEdit && preview && (
-        <div style={styles.previewBar} onMouseDown={(e) => e.stopPropagation()}>
-          <button style={styles.cancelBtn} onClick={exitPreview}>{t.backFromPreview}</button>
-          <button style={styles.saveBtn} onClick={doSave}>{t.save}</button>
-        </div>
-      )}
-
       {/* ✅ 편집모드 + 미리보기 아니면: 툴바 */}
-      {isEdit && !preview && (
+      {isEdit && !isPreview && (
         <>
-          {/* 툴바가 숨겨졌을 때: 다시 열기 버튼 */}
           {!toolbarVisible && (
             <button
               style={styles.toolsOpenBtn}
@@ -748,12 +759,6 @@ export default function CustomCanvas({
                   {dirty ? t.editingNotSaved : t.saved}
                 </span>
 
-                {/* ✅ 미리보기 버튼 */}
-                <button style={styles.previewBtn} onClick={enterPreview}>
-                  {t.preview}
-                </button>
-
-                {/* ✅ 툴바 숨김(X) */}
                 <button
                   style={styles.toolbarCloseBtn}
                   onClick={() => setToolbarVisible(false)}
@@ -766,7 +771,6 @@ export default function CustomCanvas({
             </div>
           )}
 
-          {/* ✅ 편집모드 + 미리보기 아니면: SAVE/CANCEL */}
           <div style={styles.saveBar} onMouseDown={(e) => e.stopPropagation()}>
             <button style={styles.saveBtn} onClick={doSave}>{t.save}</button>
             <button style={styles.cancelBtn} onClick={doCancel}>{t.cancel}</button>
@@ -779,7 +783,7 @@ export default function CustomCanvas({
         style={styles.layer}
         onClick={(e) => {
           if (!isEdit) return;
-          if (preview) return;
+          if (isPreview) return;
           if (e.target === e.currentTarget && !isDragging) clearSelect();
         }}
       >
@@ -796,12 +800,13 @@ export default function CustomCanvas({
                 bounds="parent"
                 size={{ width: it.w, height: it.h }}
                 position={{ x: it.x, y: it.y }}
-                // ✅ 미리보기에서는 전부 고정
-                disableDragging={!isEdit || isLocked || preview}
-                enableResizing={!isEdit ? false : (isLocked || preview ? false : undefined)}
+
+                disableDragging={!isEdit || isLocked || isPreview}
+                enableResizing={!isEdit ? false : (isLocked || isPreview ? false : undefined)}
+
                 onMouseDown={(e) => {
                   if (!isEdit) return;
-                  if (preview) return;
+                  if (isPreview) return;
 
                   e.stopPropagation();
 
@@ -813,35 +818,41 @@ export default function CustomCanvas({
 
                   showInspectorBySelect();
                 }}
+
                 onDragStart={() => {
-                  if (!isEdit || preview) return;
+                  if (!isEdit || isPreview) return;
                   setIsDragging(true);
 
-                  // ✅ 멀티선택인 경우, 대표 드래그 시작 시 스냅샷 저장
                   if (selectedIds.length >= 2 && selectedIds.includes(it.id)) {
                     beginMultiDrag(it.id);
                   } else {
                     dragAnchorRef.current = null;
                   }
                 }}
-                onResizeStart={() => isEdit && !preview && setIsDragging(true)}
+
+                onDrag={(e) => {
+                  if (!isEdit || isPreview) return;
+                  autoScrollWhileDrag(e);
+                }}
+
+                onResizeStart={() => isEdit && !isPreview && setIsDragging(true)}
+
                 onDragStop={(e, d) => {
-                  if (!isEdit || preview) return;
+                  if (!isEdit || isPreview) return;
                   setIsDragging(false);
                   if (isLocked) return;
 
-                  // ✅ 멀티선택이면 같이 이동
                   if (selectedIds.length >= 2 && selectedIds.includes(it.id)) {
                     applyMultiDragStop(it.id, d.x, d.y);
                     return;
                   }
 
-                  // 단일 이동
                   const { x: sx, y: sy } = applySnap(it.id, d.x, d.y, it.w, it.h);
                   updateItem(it.id, { x: sx, y: sy });
                 }}
+
                 onResizeStop={(e, dir, ref, delta, pos) => {
-                  if (!isEdit || preview) return;
+                  if (!isEdit || isPreview) return;
                   setIsDragging(false);
                   if (isLocked) return;
 
@@ -851,16 +862,17 @@ export default function CustomCanvas({
                   const { x: sx, y: sy } = applySnap(it.id, pos.x, pos.y, w, h);
                   updateItem(it.id, { w, h, x: sx, y: sy });
                 }}
+
                 style={{ zIndex: it.z || 0 }}
               >
-                <ItemBox item={it} selected={isEdit && isSelected && !preview} />
+                <ItemBox item={it} selected={isEdit && isSelected && !isPreview} />
               </Rnd>
             );
           })}
       </div>
 
       {/* ✅ Inspector: 편집 + 미리보기X + inspectorVisible */}
-      {isEdit && !preview && inspectorVisible && (
+      {isEdit && !isPreview && inspectorVisible && (
         <div
           style={{ ...styles.inspector, top: inspectorTop }}
           onMouseDown={(e) => e.stopPropagation()}
@@ -1256,8 +1268,6 @@ function getTexts(lang) {
     save: '저장',
     cancel: '취소',
 
-    preview: '미리보기',
-    backFromPreview: '뒤로가기',
     openTools: '도구 열기',
     hideTools: '도구 숨기기',
 
@@ -1337,8 +1347,6 @@ function getTexts(lang) {
     save: 'Save',
     cancel: 'Cancel',
 
-    preview: 'Preview',
-    backFromPreview: 'Back',
     openTools: 'Show Tools',
     hideTools: 'Hide Tools',
 
@@ -1442,15 +1450,6 @@ const styles = {
     cursor: 'pointer',
     fontWeight: 900,
   },
-  previewBtn: {
-    padding: '8px 10px',
-    borderRadius: 10,
-    border: '1px solid rgba(255,255,255,0.35)',
-    cursor: 'pointer',
-    fontWeight: 900,
-    background: 'rgba(255,255,255,0.12)',
-    color: '#fff',
-  },
   toolbarCloseBtn: {
     width: 34,
     height: 34,
@@ -1479,17 +1478,6 @@ const styles = {
   gridNum: { width: 70, padding: '8px 8px', borderRadius: 10, border: 'none', fontWeight: 900 },
   presetSelect: { padding: '8px 10px', borderRadius: 10, border: 'none', fontWeight: 900 },
   sep: { width: 1, height: 20, background: 'rgba(255,255,255,0.25)', margin: '0 4px' },
-
-  // ✅ 미리보기에서만 보이는 바
-  previewBar: {
-    position: 'fixed',
-    right: 16,
-    bottom: 16,
-    zIndex: 9999,
-    pointerEvents: 'auto',
-    display: 'flex',
-    gap: 10,
-  },
 
   saveBar: {
     position: 'fixed',

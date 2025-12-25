@@ -20,11 +20,17 @@ const DEFAULT_PIN = '0000';
 // ✅ 언어
 const LANG_KEY = 'APP_LANG_V1';
 
+// ✅ “페이지” 단위(편집용)
+const PAGE_HEIGHT = 2200; // 1페이지 기준 높이
+const PAGE_GAP = 40;      // 페이지 사이 간격(시각적 구분)
+const MIN_CONTENT_HEIGHT = PAGE_HEIGHT; // 아이템이 없어도 최소 1페이지
+
 function TemplatePicker({ onPick, lang }) {
   const title = lang === 'ko' ? '템플릿 선택' : 'Select template';
-  const note = lang === 'ko'
-    ? '* 템플릿은 다음 단계에서 입력 UI를 붙일 예정입니다.'
-    : '* We will add input UI in the next step.';
+  const note =
+    lang === 'ko'
+      ? '* 템플릿은 다음 단계에서 입력 UI를 붙일 예정입니다.'
+      : '* We will add input UI in the next step.';
 
   const t1 = lang === 'ko' ? '리스트형' : 'List';
   const t2 = lang === 'ko' ? '사진 + 리스트' : 'Photo + List';
@@ -61,6 +67,9 @@ export default function MenuEditor() {
   // ✅ “편집 모드”
   const [edit, setEdit] = useState(false);
 
+  // ✅ MenuEditor 미리보기(단 하나)
+  const [preview, setPreview] = useState(false);
+
   const fileInputRef = useRef(null);
   const [dragOver, setDragOver] = useState(false);
 
@@ -76,6 +85,12 @@ export default function MenuEditor() {
 
   // ---- 길게 누르기 타이머
   const longPressRef = useRef(null);
+
+  // ✅ stage 스크롤 ref (CustomCanvas 드래그 자동 스크롤용)
+  const stageScrollRef = useRef(null);
+
+  // ✅ 편집 방식 변경 모달(편집 중에도)
+  const [editModeModalOpen, setEditModeModalOpen] = useState(false);
 
   // ✅ PIN 상태
   const [pin, setPin] = useState(DEFAULT_PIN);
@@ -96,8 +111,9 @@ export default function MenuEditor() {
   // ✅ 언어 상태
   const [lang, setLang] = useState('en');
 
-  // ✅ NEW: CustomCanvas preview 상태(국기/핀버튼 숨김용)
-  const [canvasPreview, setCanvasPreview] = useState(false);
+  // ✅ 편집창 페이지 단위 보기
+  const [pageView, setPageView] = useState(true);
+  const [pageIndex, setPageIndex] = useState(1);
 
   useEffect(() => {
     (async () => {
@@ -132,7 +148,7 @@ export default function MenuEditor() {
     try { localStorage.setItem(LANG_KEY, next); } catch {}
   };
 
-  // ✅ 영상으로 돌아가기 (경로 필요하면 여기만 바꿔)
+  // ✅ 영상으로 돌아가기
   const goIntro = () => router.push('/intro');
 
   const bgUrl = useMemo(() => {
@@ -174,9 +190,9 @@ export default function MenuEditor() {
     setShowEditBtn(false);
   };
 
-  // ✅ 수정 버튼을 “보여주기” (보기모드일 때만 5초 자동 숨김)
+  // ✅ 수정 버튼을 “보여주기”
   const revealEditButton = () => {
-    if (edit) return; // ✅ 편집중에는 “수정 버튼” 자체를 안 씀
+    if (edit) return;
 
     setShowEditBtn(true);
 
@@ -207,7 +223,7 @@ export default function MenuEditor() {
     }
   };
 
-  // ✅ 길게 누르기 시작/종료 (3초)
+  // ✅ 길게 누르기 (3초)
   const startLongPress = (e) => {
     if (edit) return;
     e.preventDefault();
@@ -247,6 +263,7 @@ export default function MenuEditor() {
     if ((pinInput || '').trim() === pin) {
       setPinModalOpen(false);
       setEdit(true);
+      setPreview(false);
       setPinInput('');
       setPinError('');
       return;
@@ -267,9 +284,11 @@ export default function MenuEditor() {
     const cp = (newPinConfirm || '').trim();
 
     if (!/^\d{4}$/.test(np)) {
-      setSettingsError(lang === 'ko'
-        ? '새 비밀번호는 숫자 4자리(예: 1234)로 입력해 주세요.'
-        : 'New PIN must be exactly 4 digits (e.g., 1234).');
+      setSettingsError(
+        lang === 'ko'
+          ? '새 비밀번호는 숫자 4자리(예: 1234)로 입력해 주세요.'
+          : 'New PIN must be exactly 4 digits (e.g., 1234).'
+      );
       return;
     }
     if (np !== cp) {
@@ -315,6 +334,20 @@ export default function MenuEditor() {
       editModePick: '수정 방식 선택',
       freeEdit: '자유 배치로 편집하기',
       templateBadge: '템플릿 모드: ',
+      changeMode: '편집 방식 변경',
+
+      // ✅ 페이지 UI
+      pageView: '페이지 보기',
+      continuous: '연속 보기',
+      page: '페이지',
+      prev: '이전',
+      next: '다음',
+      jump: '이동',
+
+      // ✅ 미리보기
+      preview: '미리보기',
+      save: '저장',
+      back: '뒤로가기',
     },
     en: {
       pickBgTitle: 'Select a menu background',
@@ -345,10 +378,94 @@ export default function MenuEditor() {
       editModePick: 'Choose edit mode',
       freeEdit: 'Edit with Free Layout',
       templateBadge: 'Template Mode: ',
+      changeMode: 'Change Edit Mode',
+
+      // ✅ Page UI
+      pageView: 'Page View',
+      continuous: 'Continuous',
+      page: 'Page',
+      prev: 'Prev',
+      next: 'Next',
+      jump: 'Go',
+
+      // ✅ Preview
+      preview: 'Preview',
+      save: 'Save',
+      back: 'Back',
     },
   }[lang];
 
-  const isOverlayOpen = pinModalOpen || settingsOpen; // ✅ 모달 열리면 하단/기타 버튼 숨김용
+  const isOverlayOpen = pinModalOpen || settingsOpen || editModeModalOpen;
+
+  // ✅ 아이템 위치에 따라 “컨텐츠 높이” 자동 계산 → 아래로 내리면 더 이상 안 짤림
+  const contentHeight = useMemo(() => {
+    const items = Array.isArray(layout?.items) ? layout.items : [];
+    let maxBottom = 0;
+    for (const it of items) {
+      const b = (it?.y || 0) + (it?.h || 0);
+      if (b > maxBottom) maxBottom = b;
+    }
+    const needed = Math.ceil(maxBottom + 240); // 여유 padding
+    return Math.max(MIN_CONTENT_HEIGHT, needed);
+  }, [layout]);
+
+  // ✅ 총 페이지 수(아이템이 없어도 1페이지)
+  const totalPages = useMemo(() => {
+    return Math.max(1, Math.ceil(contentHeight / PAGE_HEIGHT));
+  }, [contentHeight]);
+
+  // ✅ 스크롤 전체 높이(페이지 간격 포함)
+  const fullScrollHeight = useMemo(() => {
+    if (totalPages <= 1) return contentHeight;
+    return Math.max(contentHeight, totalPages * PAGE_HEIGHT + (totalPages - 1) * PAGE_GAP);
+  }, [contentHeight, totalPages]);
+
+  // ✅ pageIndex 보정
+  useEffect(() => {
+    if (pageIndex > totalPages) setPageIndex(totalPages);
+    if (pageIndex < 1) setPageIndex(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [totalPages]);
+
+  // ✅ 페이지로 점프
+  const scrollToPage = (pi) => {
+    const sc = stageScrollRef.current;
+    if (!sc) return;
+    const idx = Math.min(Math.max(1, pi), totalPages);
+    const top = (idx - 1) * (PAGE_HEIGHT + PAGE_GAP);
+    sc.scrollTo({ top, behavior: 'smooth' });
+  };
+
+  // ✅ pageView 켰을 때 페이지 바뀌면 자동 점프 (편집 + 미리보기 아님)
+  useEffect(() => {
+    if (!edit) return;
+    if (preview) return;
+    if (!pageView) return;
+    scrollToPage(pageIndex);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pageIndex, edit, pageView, preview]);
+
+  // ✅ 편집 시작하면 기본: 페이지 보기 ON
+  useEffect(() => {
+    if (edit) {
+      setPageView(true);
+      setPageIndex(1);
+      setPreview(false);
+    } else {
+      setPreview(false);
+    }
+  }, [edit]);
+
+  const handleSaveAll = async () => {
+    const next = { ...layout, mode: 'custom' };
+    setLayout(next);
+    await saveJson(KEYS.MENU_LAYOUT, next);
+    setPreview(false);
+    setEdit(false);
+    hideEditButton();
+  };
+
+  const handleExitPreview = () => setPreview(false);
 
   return (
     <div style={styles.container}>
@@ -392,273 +509,430 @@ export default function MenuEditor() {
           </div>
         </div>
       ) : (
-        <div style={styles.stage}>
-          <img src={bgUrl} alt="menu background" style={styles.bgImg} />
-
-          {/* ✅ 언어 버튼(국기) - Preview에서는 숨김 */}
-          {!canvasPreview && (
-            <div style={styles.langWrap}>
-              <button
-                style={{ ...styles.langBtn, ...(lang === 'en' ? styles.langBtnActive : {}) }}
-                onClick={() => setLanguage('en')}
-                aria-label="English"
-                title="English"
-              >
-                🇺🇸
-              </button>
-              <button
-                style={{ ...styles.langBtn, ...(lang === 'ko' ? styles.langBtnActive : {}) }}
-                onClick={() => setLanguage('ko')}
-                aria-label="Korean"
-                title="한국어"
-              >
-                🇰🇷
-              </button>
-            </div>
-          )}
-
-          {/* ✅ 뒤로가기(영상으로): 모달/설정에서는 숨김 */}
-          {!isOverlayOpen && !edit && (
-            <button style={styles.backBtn} onClick={goIntro}>
-              {T.backToVideo}
-            </button>
-          )}
-
-          {/* ✅ 비밀 hotspot (편집 아니고, 수정버튼 안 보일 때만) */}
-          {!showEditBtn && !edit && (
+        // ✅ stage 자체가 스크롤 컨테이너
+        <div ref={stageScrollRef} style={styles.stage}>
+          <div style={{ ...styles.page, height: fullScrollHeight }}>
+            {/* ✅ 배경: repeat-y 타일 */}
             <div
-              style={styles.secretHotspot}
-              onClick={onSecretCornerClick}
-              onMouseDown={startLongPress}
-              onMouseUp={cancelLongPress}
-              onMouseLeave={cancelLongPress}
-              onTouchStart={startLongPress}
-              onTouchEnd={cancelLongPress}
-              onTouchCancel={cancelLongPress}
-              aria-label="secret-edit-hotspot"
+              style={{
+                ...styles.bgTile,
+                backgroundImage: `url(${bgUrl})`,
+              }}
             />
-          )}
 
-          {/* ✅ 편집 모드 상단 버튼바 - Preview에서는 숨김 */}
-          {edit && !canvasPreview && (
-            <div style={styles.editTopBar}>
+            {/* ✅ 페이지 경계선 표시(편집 중 && 미리보기 아닐 때) */}
+            {edit && !preview && (
+              <>
+                {Array.from({ length: totalPages - 1 }).map((_, i) => {
+                  const y = (i + 1) * PAGE_HEIGHT + i * PAGE_GAP;
+                  return (
+                    <div
+                      key={i}
+                      style={{
+                        position: 'absolute',
+                        left: 0,
+                        right: 0,
+                        top: y,
+                        height: PAGE_GAP,
+                        background: 'rgba(0,0,0,0.65)',
+                        borderTop: '1px dashed rgba(255,255,255,0.55)',
+                        borderBottom: '1px dashed rgba(255,255,255,0.55)',
+                        zIndex: 30,
+                        pointerEvents: 'none',
+                      }}
+                    />
+                  );
+                })}
+              </>
+            )}
+
+            {/* ✅ 언어(국기) — 메뉴 화면에서도 항상 보이기 (단, 미리보기/모달에서는 숨김) */}
+            {!isOverlayOpen && !preview && (
+              <div style={styles.langWrap}>
+                <button
+                  style={{ ...styles.langBtn, ...(lang === 'en' ? styles.langBtnActive : {}) }}
+                  onClick={() => setLanguage('en')}
+                  aria-label="English"
+                  title="English"
+                >
+                  🇺🇸
+                </button>
+                <button
+                  style={{ ...styles.langBtn, ...(lang === 'ko' ? styles.langBtnActive : {}) }}
+                  onClick={() => setLanguage('ko')}
+                  aria-label="Korean"
+                  title="한국어"
+                >
+                  🇰🇷
+                </button>
+              </div>
+            )}
+
+            {/* ✅ 국기 아래 세로 메뉴: (편집 중 && 미리보기 아님) */}
+            {edit && !preview && !isOverlayOpen && (
+              <div style={styles.editMenu} onMouseDown={(e) => e.stopPropagation()}>
+                <button
+                  style={styles.menuBtn}
+                  onClick={() => setEditModeModalOpen(true)}
+                >
+                  {T.changeMode}
+                </button>
+
+                <button
+                  style={styles.menuBtn}
+                  onClick={() => {
+                    setSettingsError('');
+                    setSettingsMsg('');
+                    setSettingsOpen(true);
+                  }}
+                >
+                  {T.pinSettings}
+                </button>
+
+                <button style={styles.menuBtn} onClick={openFilePicker}>
+                  {T.changeBg}
+                </button>
+
+                <button style={styles.menuBtnDark} onClick={() => setPreview(true)}>
+                  {T.preview}
+                </button>
+
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  style={{ display: 'none' }}
+                  onChange={(e) => uploadBg(e.target.files?.[0])}
+                />
+              </div>
+            )}
+
+            {/* ✅ 미리보기 모드: 저장/뒤로가기만 */}
+            {edit && preview && !isOverlayOpen && (
+              <div style={styles.previewBar} onMouseDown={(e) => e.stopPropagation()}>
+                <button style={styles.menuBtnDark} onClick={handleSaveAll}>
+                  {T.save}
+                </button>
+                <button style={styles.menuBtn} onClick={handleExitPreview}>
+                  {T.back}
+                </button>
+              </div>
+            )}
+
+            {/* ✅ 뒤로가기(영상으로): 모달/설정/편집/미리보기에서는 숨김 */}
+            {!isOverlayOpen && !edit && !preview && (
+              <button style={styles.backBtn} onClick={goIntro}>
+                {T.backToVideo}
+              </button>
+            )}
+
+            {/* ✅ 비밀 hotspot (편집 아니고, 수정버튼 안 보일 때만 / 미리보기 제외) */}
+            {!showEditBtn && !edit && !preview && (
+              <div
+                style={styles.secretHotspot}
+                onClick={onSecretCornerClick}
+                onMouseDown={startLongPress}
+                onMouseUp={cancelLongPress}
+                onMouseLeave={cancelLongPress}
+                onTouchStart={startLongPress}
+                onTouchEnd={cancelLongPress}
+                onTouchCancel={cancelLongPress}
+                aria-label="secret-edit-hotspot"
+              />
+            )}
+
+            {/* ✅ NEW: 편집 중 페이지 컨트롤(연속 보기/이전/다음/이동) - 미리보기에서는 숨김 */}
+            {edit && !preview && (
+              <div style={styles.pageCtrl} onMouseDown={(e) => e.stopPropagation()}>
+                <button
+                  style={styles.pageCtrlBtn}
+                  onClick={() => setPageView((v) => !v)}
+                  title="toggle page view"
+                >
+                  {pageView ? T.continuous : T.pageView}
+                </button>
+
+                <div style={{ width: 10 }} />
+
+                <button
+                  style={styles.pageCtrlBtn}
+                  onClick={() => {
+                    const next = Math.max(1, pageIndex - 1);
+                    setPageIndex(next);
+                    if (!pageView) scrollToPage(next);
+                  }}
+                  disabled={pageIndex <= 1}
+                >
+                  {T.prev}
+                </button>
+
+                <div style={styles.pageCtrlText}>
+                  {T.page} {pageIndex} / {totalPages}
+                </div>
+
+                <button
+                  style={styles.pageCtrlBtn}
+                  onClick={() => {
+                    const next = Math.min(totalPages, pageIndex + 1);
+                    setPageIndex(next);
+                    if (!pageView) scrollToPage(next);
+                  }}
+                  disabled={pageIndex >= totalPages}
+                >
+                  {T.next}
+                </button>
+
+                <button
+                  style={styles.pageCtrlBtn}
+                  onClick={() => scrollToPage(pageIndex)}
+                >
+                  {T.jump}
+                </button>
+              </div>
+            )}
+
+            {/* ✅ 보기모드에서만 “수정” 버튼 노출 (미리보기 제외) */}
+            {!edit && !preview && showEditBtn && !isOverlayOpen && (
               <button
-                style={styles.topBtn}
-                onClick={() => {
-                  setSettingsError('');
-                  setSettingsMsg('');
-                  setSettingsOpen(true);
+                style={styles.editBtn}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  requestEdit();
                 }}
               >
-                {T.pinSettings}
+                {T.edit}
               </button>
+            )}
 
-              <button style={styles.topBtn} onClick={openFilePicker}>
-                {T.changeBg}
-              </button>
+            {!layout.mode && !preview && (
+              <div style={styles.helpHint}>{T.help}</div>
+            )}
 
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                style={{ display: 'none' }}
-                onChange={(e) => uploadBg(e.target.files?.[0])}
+            {layout.mode === 'template' && !preview && (
+              <div style={styles.badge}>{T.templateBadge}{layout.templateId}</div>
+            )}
+
+            {layout.mode === 'custom' && (
+              <CustomCanvas
+                lang={lang}
+                inspectorTop={118}
+                items={layout.items}
+                editing={edit}
+                uiMode={preview ? 'preview' : 'edit'}   // ✅ 핵심: preview면 UI/인터랙션 싹 OFF
+                scrollRef={stageScrollRef}
+                onChangeItems={(items) => {
+                  const next = { ...layout, mode: 'custom', items };
+                  setLayout(next);
+                }}
+                onSave={(items) => {
+                  const next = { ...layout, mode: 'custom', items };
+                  setLayout(next);
+                  saveJson(KEYS.MENU_LAYOUT, next);
+
+                  setPreview(false);
+                  setEdit(false);
+                  hideEditButton();
+                }}
+                onCancel={() => {
+                  setPreview(false);
+                  setEdit(false);
+                  hideEditButton();
+                }}
               />
-            </div>
-          )}
+            )}
 
-          {/* ✅ 보기모드에서만 “수정” 버튼 노출 (편집 들어가면 안 보이게) */}
-          {!edit && showEditBtn && !isOverlayOpen && (
-            <button
-              style={styles.editBtn}
-              onClick={(e) => {
-                e.stopPropagation();
-                requestEdit();
-              }}
-            >
-              {T.edit}
-            </button>
-          )}
+            {/* ✅ 최초 편집 모드 선택 모달 */}
+            {edit && !preview && layout.mode !== 'custom' && (
+              <div style={styles.modalBg} onClick={() => { setEdit(false); setPreview(false); hideEditButton(); }}>
+                <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+                  <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 10 }}>
+                    {T.editModePick}
+                  </div>
 
-          {!layout.mode && (
-            <div style={styles.helpHint}>{T.help}</div>
-          )}
+                  <TemplatePicker
+                    lang={lang}
+                    onPick={(id) => {
+                      const next = { ...layout, mode: 'template', templateId: id };
+                      setLayout(next);
+                      saveJson(KEYS.MENU_LAYOUT, next);
 
-          {layout.mode === 'template' && (
-            <div style={styles.badge}>{T.templateBadge}{layout.templateId}</div>
-          )}
+                      setEdit(false);
+                      setPreview(false);
+                      hideEditButton();
+                    }}
+                  />
 
-          {layout.mode === 'custom' && (
-            <CustomCanvas
-              lang={lang}
-              topOffset={140}
-              toolbarTop={58}
-              inspectorTop={118}
-              items={layout.items}
-              editing={edit}
-              // ✅ NEW: preview 상태 전달 받기
-              onPreviewChange={setCanvasPreview}
-              onChangeItems={(items) => {
-                const next = { ...layout, mode: 'custom', items };
-                setLayout(next);
-              }}
-              onSave={(items) => {
-                const next = { ...layout, mode: 'custom', items };
-                setLayout(next);
-                saveJson(KEYS.MENU_LAYOUT, next);
+                  <div style={{ height: 12 }} />
 
-                setEdit(false);
-                setCanvasPreview(false); // ✅ 저장 시 안전하게 초기화
-                hideEditButton(); // 저장 후 다시 3초 눌러야 보이게
-              }}
-              onCancel={() => {
-                setEdit(false);
-                setCanvasPreview(false); // ✅ 취소 시 안전하게 초기화
-                hideEditButton();
-              }}
-            />
-          )}
+                  <button
+                    style={styles.primaryBtn}
+                    onClick={() => {
+                      const next = { ...layout, mode: 'custom', templateId: null };
+                      setLayout(next);
+                      saveJson(KEYS.MENU_LAYOUT, next);
+                      setEdit(true);
+                      setPreview(false);
+                    }}
+                  >
+                    {T.freeEdit}
+                  </button>
 
-          {edit && layout.mode !== 'custom' && (
-            <div style={styles.modalBg} onClick={() => { setEdit(false); hideEditButton(); }}>
-              <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-                <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 10 }}>
-                  {T.editModePick}
-                </div>
-
-                <TemplatePicker
-                  lang={lang}
-                  onPick={(id) => {
-                    const next = { ...layout, mode: 'template', templateId: id };
-                    setLayout(next);
-                    saveJson(KEYS.MENU_LAYOUT, next);
-
-                    setEdit(false);
-                    hideEditButton();
-                  }}
-                />
-
-                <div style={{ height: 12 }} />
-
-                <button
-                  style={styles.primaryBtn}
-                  onClick={() => {
-                    const next = { ...layout, mode: 'custom', templateId: null };
-                    setLayout(next);
-                    saveJson(KEYS.MENU_LAYOUT, next);
-                    setEdit(true);
-                  }}
-                >
-                  {T.freeEdit}
-                </button>
-
-                <button
-                  style={styles.secondaryBtn}
-                  onClick={() => {
-                    setEdit(false);
-                    hideEditButton();
-                  }}
-                >
-                  {T.close}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* ✅ PIN 모달 */}
-          {pinModalOpen && (
-            <div style={styles.modalBg} onClick={() => setPinModalOpen(false)}>
-              <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-                <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>
-                  {T.pinEnterTitle}
-                </div>
-                <div style={{ fontSize: 13, opacity: 0.75, marginBottom: 10 }}>
-                  {T.pinEnterDesc}
-                </div>
-
-                <input
-                  type="password"
-                  value={pinInput}
-                  onChange={(e) => setPinInput(e.target.value)}
-                  inputMode="numeric"
-                  placeholder={lang === 'ko' ? '4자리 숫자' : '4 digits'}
-                  style={styles.pinInput}
-                  maxLength={4}
-                  autoFocus
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') submitPin();
-                    if (e.key === 'Escape') setPinModalOpen(false);
-                  }}
-                />
-
-                {pinError && <div style={styles.errText}>{pinError}</div>}
-
-                <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-                  <button style={styles.primaryBtn} onClick={submitPin}>{T.confirm}</button>
-                  <button style={styles.secondaryBtn} onClick={() => setPinModalOpen(false)}>{T.cancel}</button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ✅ 비밀번호 설정 모달 */}
-          {settingsOpen && (
-            <div style={styles.modalBg} onClick={() => setSettingsOpen(false)}>
-              <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-                <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>
-                  {T.pinSettings}
-                </div>
-
-                <div style={{ fontWeight: 900, marginBottom: 6 }}>{T.pinChange}</div>
-
-                <input
-                  type="password"
-                  value={curPinInput}
-                  onChange={(e) => setCurPinInput(e.target.value)}
-                  inputMode="numeric"
-                  placeholder={T.curPin}
-                  style={styles.pinInput}
-                  maxLength={4}
-                />
-                <input
-                  type="password"
-                  value={newPinInput}
-                  onChange={(e) => setNewPinInput(e.target.value)}
-                  inputMode="numeric"
-                  placeholder={T.newPin}
-                  style={styles.pinInput}
-                  maxLength={4}
-                />
-                <input
-                  type="password"
-                  value={newPinConfirm}
-                  onChange={(e) => setNewPinConfirm(e.target.value)}
-                  inputMode="numeric"
-                  placeholder={T.newPin2}
-                  style={styles.pinInput}
-                  maxLength={4}
-                />
-
-                {settingsError && <div style={styles.errText}>{settingsError}</div>}
-                {settingsMsg && <div style={styles.okText}>{settingsMsg}</div>}
-
-                <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-                  <button style={styles.primaryBtn} onClick={submitChangePin}>{T.change}</button>
                   <button
                     style={styles.secondaryBtn}
                     onClick={() => {
-                      setSettingsOpen(false);
-                      setSettingsError('');
-                      setSettingsMsg('');
+                      setEdit(false);
+                      setPreview(false);
+                      hideEditButton();
                     }}
                   >
                     {T.close}
                   </button>
                 </div>
               </div>
-            </div>
-          )}
+            )}
 
+            {/* ✅ 편집 중에도 전환 가능한 "편집 방식 변경" 모달 */}
+            {edit && !preview && editModeModalOpen && (
+              <div
+                style={styles.modalBg}
+                onClick={() => setEditModeModalOpen(false)}
+              >
+                <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+                  <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>
+                    {T.changeMode}
+                  </div>
+
+                  <TemplatePicker
+                    lang={lang}
+                    onPick={(id) => {
+                      const next = { ...layout, mode: 'template', templateId: id };
+                      setLayout(next);
+                      saveJson(KEYS.MENU_LAYOUT, next);
+                      setEditModeModalOpen(false);
+                    }}
+                  />
+
+                  <div style={{ height: 12 }} />
+
+                  <button
+                    style={styles.primaryBtn}
+                    onClick={() => {
+                      const next = { ...layout, mode: 'custom', templateId: null };
+                      setLayout(next);
+                      saveJson(KEYS.MENU_LAYOUT, next);
+                      setEditModeModalOpen(false);
+                      setEdit(true);
+                      setPreview(false);
+                    }}
+                  >
+                    {T.freeEdit}
+                  </button>
+
+                  <button
+                    style={styles.secondaryBtn}
+                    onClick={() => setEditModeModalOpen(false)}
+                  >
+                    {T.close}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ✅ PIN 모달 */}
+            {pinModalOpen && (
+              <div style={styles.modalBg} onClick={() => setPinModalOpen(false)}>
+                <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+                  <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>
+                    {T.pinEnterTitle}
+                  </div>
+                  <div style={{ fontSize: 13, opacity: 0.75, marginBottom: 10 }}>
+                    {T.pinEnterDesc}
+                  </div>
+
+                  <input
+                    type="password"
+                    value={pinInput}
+                    onChange={(e) => setPinInput(e.target.value)}
+                    inputMode="numeric"
+                    placeholder={lang === 'ko' ? '4자리 숫자' : '4 digits'}
+                    style={styles.pinInput}
+                    maxLength={4}
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') submitPin();
+                      if (e.key === 'Escape') setPinModalOpen(false);
+                    }}
+                  />
+
+                  {pinError && <div style={styles.errText}>{pinError}</div>}
+
+                  <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+                    <button style={styles.primaryBtn} onClick={submitPin}>{T.confirm}</button>
+                    <button style={styles.secondaryBtn} onClick={() => setPinModalOpen(false)}>{T.cancel}</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ✅ 비밀번호 설정 모달 */}
+            {settingsOpen && (
+              <div style={styles.modalBg} onClick={() => setSettingsOpen(false)}>
+                <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+                  <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>
+                    {T.pinSettings}
+                  </div>
+
+                  <div style={{ fontWeight: 900, marginBottom: 6 }}>{T.pinChange}</div>
+
+                  <input
+                    type="password"
+                    value={curPinInput}
+                    onChange={(e) => setCurPinInput(e.target.value)}
+                    inputMode="numeric"
+                    placeholder={T.curPin}
+                    style={styles.pinInput}
+                    maxLength={4}
+                  />
+                  <input
+                    type="password"
+                    value={newPinInput}
+                    onChange={(e) => setNewPinInput(e.target.value)}
+                    inputMode="numeric"
+                    placeholder={T.newPin}
+                    style={styles.pinInput}
+                    maxLength={4}
+                  />
+                  <input
+                    type="password"
+                    value={newPinConfirm}
+                    onChange={(e) => setNewPinConfirm(e.target.value)}
+                    inputMode="numeric"
+                    placeholder={T.newPin2}
+                    style={styles.pinInput}
+                    maxLength={4}
+                  />
+
+                  {settingsError && <div style={styles.errText}>{settingsError}</div>}
+                  {settingsMsg && <div style={styles.okText}>{settingsMsg}</div>}
+
+                  <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+                    <button style={styles.primaryBtn} onClick={submitChangePin}>{T.change}</button>
+                    <button
+                      style={styles.secondaryBtn}
+                      onClick={() => {
+                        setSettingsOpen(false);
+                        setSettingsError('');
+                        setSettingsMsg('');
+                      }}
+                    >
+                      {T.close}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+          </div>
         </div>
       )}
     </div>
@@ -705,8 +979,32 @@ const styles = {
   hint: { marginTop: 10, fontSize: 12, opacity: 0.65 },
   smallNote: { marginTop: 12, fontSize: 12, opacity: 0.7 },
 
-  stage: { position: 'relative', width: '100%', height: '100%', overflow: 'hidden' },
-  bgImg: { width: '100%', height: '100%', objectFit: 'cover' },
+  // ✅ stage가 스크롤 컨테이너
+  stage: {
+    position: 'relative',
+    width: '100%',
+    height: '100%',
+    overflowY: 'auto',
+    overflowX: 'hidden',
+    WebkitOverflowScrolling: 'touch',
+    background: '#000',
+  },
+
+  page: {
+    position: 'relative',
+    width: '100%',
+  },
+
+  // ✅ 배경: repeat-y 타일
+  bgTile: {
+    position: 'absolute',
+    inset: 0,
+    backgroundRepeat: 'repeat-y',
+    backgroundPosition: 'top center',
+    backgroundSize: '100% auto',
+    filter: 'none',
+    zIndex: 0,
+  },
 
   secretHotspot: {
     position: 'absolute',
@@ -719,16 +1017,17 @@ const styles = {
     touchAction: 'none',
   },
 
-  // ✅ 언어 버튼(국기)
+  // ✅ 언어 버튼(국기) — 우측 상단
   langWrap: {
-    position: 'absolute',
-    top: 12,
-    right: 12,
-    zIndex: 2600,
+    position: 'fixed',
+    top: 16,
+    right: 16,
+    zIndex: 99999,
     display: 'flex',
     gap: 8,
     alignItems: 'center',
   },
+
   langBtn: {
     width: 40,
     height: 32,
@@ -744,9 +1043,58 @@ const styles = {
     background: 'rgba(0,0,0,0.65)',
   },
 
+  // ✅ 국기 아래 세로 메뉴
+  editMenu: {
+    position: 'fixed',
+    top: 56,
+    right: 16,
+    zIndex: 99999,
+    display: 'flex',
+    flexDirection: 'row',
+    gap: 10,
+    alignItems: 'stretch',
+    flexWrap: 'nowrap',
+    overflowX: 'auto',
+  },
+
+  // ✅ 미리보기 모드: 저장/뒤로가기만
+  previewBar: {
+    position: 'fixed',
+    right: 16,
+    bottom: 16,          // ✅ 저장/취소 자리로
+    zIndex: 9999,
+    pointerEvents: 'auto',
+    display: 'flex',
+    flexDirection: 'row', // ✅ 한 줄
+    gap: 10,
+    alignItems: 'center',
+    flexWrap: 'nowrap',
+  },
+
+  menuBtn: {
+    padding: '10px 14px',
+    borderRadius: 12,
+    border: 'none',
+    cursor: 'pointer',
+    fontWeight: 900,
+    background: 'rgba(255,255,255,0.9)',
+    whiteSpace: 'nowrap',
+  },
+
+  menuBtnDark: {
+    padding: '10px 14px',
+    borderRadius: 12,
+    border: '1px solid rgba(255,255,255,0.35)',
+    cursor: 'pointer',
+    fontWeight: 900,
+    background: 'rgba(0,0,0,0.55)',
+    color: '#fff',
+    whiteSpace: 'nowrap',
+  },
+
   // ✅ 보기모드에서만 보이는 수정 버튼
   editBtn: {
-    position: 'absolute',
+    position: 'fixed',
     top: 58,
     right: 16,
     padding: '10px 14px',
@@ -757,29 +1105,42 @@ const styles = {
     zIndex: 2200,
   },
 
-  // ✅ 편집모드 상단 버튼바 (언어 길이 상관없이 일정 간격)
-  editTopBar: {
-    position: 'absolute',
-    top: 58,
-    right: 16,
-    zIndex: 2500, // ✅ Inspector보다 위
+  // ✅ 페이지 컨트롤
+  pageCtrl: {
+    position: 'fixed',
+    left: 16,
+    bottom: 16,
+    zIndex: 99999,
     display: 'flex',
-    gap: 10,
     alignItems: 'center',
+    gap: 8,
+    padding: '10px 12px',
+    borderRadius: 14,
+    background: 'rgba(0,0,0,0.55)',
+    color: '#fff',
+    backdropFilter: 'blur(6px)',
   },
-  topBtn: {
-    padding: '10px 14px',
-    borderRadius: 12,
-    border: 'none',
+  pageCtrlBtn: {
+    padding: '8px 10px',
+    borderRadius: 10,
+    border: '1px solid rgba(255,255,255,0.25)',
     cursor: 'pointer',
     fontWeight: 900,
-    background: 'rgba(255,255,255,0.9)',
-    whiteSpace: 'nowrap',
+    background: 'rgba(255,255,255,0.10)',
+    color: '#fff',
+    opacity: 1,
+  },
+  pageCtrlText: {
+    fontWeight: 900,
+    fontSize: 13,
+    opacity: 0.95,
+    padding: '0 6px',
+    userSelect: 'none',
   },
 
   // ✅ 뒤로가기(영상으로)
   backBtn: {
-    position: 'absolute',
+    position: 'fixed',
     left: 16,
     bottom: 16,
     padding: '10px 14px',
@@ -792,9 +1153,9 @@ const styles = {
   },
 
   badge: {
-    position: 'absolute',
+    position: 'fixed',
     left: 16,
-    top: 16,
+    top: 64,
     zIndex: 150,
     color: '#fff',
     background: 'rgba(0,0,0,0.55)',
@@ -803,7 +1164,7 @@ const styles = {
   },
 
   helpHint: {
-    position: 'absolute',
+    position: 'fixed',
     left: 16,
     bottom: 60,
     zIndex: 150,
