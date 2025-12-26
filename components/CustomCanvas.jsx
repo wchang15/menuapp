@@ -1458,9 +1458,11 @@ const styles = {
     background: 'rgba(255,255,255,0.10)',
     color: '#fff',
     fontSize: 22,
-    lineHeight: '30px',
+    lineHeight: 1,
     cursor: 'pointer',
     fontWeight: 900,
+    display: 'grid',
+    placeItems: 'center',
   },
   toolsOpenBtn: {
     position: 'fixed',

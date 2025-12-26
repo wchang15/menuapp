@@ -222,6 +222,8 @@ export default function MenuEditor() {
   // ✅ MenuEditor 미리보기(단 하나)
   const [preview, setPreview] = useState(false);
 
+  const [showEditorMenu, setShowEditorMenu] = useState(false);
+
   const fileInputRef = useRef(null);
   const pageBgInputRef = useRef(null);
 
@@ -604,6 +606,7 @@ export default function MenuEditor() {
       changeBg: '배경(전체) 선택',
       pageBg: '페이지 배경',
       pinSettings: '비밀번호 설정',
+      editorMenu: '에디터 메뉴',
       pinEnterTitle: '비밀번호 입력',
       pinEnterDesc: '수정하려면 비밀번호(기본 0000)를 입력하세요.',
       confirm: '확인',
@@ -657,6 +660,7 @@ export default function MenuEditor() {
       changeBg: 'Background (All Pages)',
       pageBg: 'Page Background',
       pinSettings: 'PIN Settings',
+      editorMenu: 'Editor Menu',
       pinEnterTitle: 'Enter PIN',
       pinEnterDesc: 'Enter your PIN (default 0000) to edit.',
       confirm: 'Confirm',
@@ -697,6 +701,12 @@ export default function MenuEditor() {
   }[lang];
 
   const isOverlayOpen = pinModalOpen || settingsOpen || editModeModalOpen || pageBgModalOpen;
+
+  useEffect(() => {
+    if (!edit || preview || isOverlayOpen) {
+      setShowEditorMenu(false);
+    }
+  }, [edit, preview, isOverlayOpen]);
 
   // ✅ 페이지 계산
   const computedPages = useMemo(() => {
@@ -999,8 +1009,9 @@ export default function MenuEditor() {
               style={{
                 ...styles.page,
                 height: fullScrollHeight,
+                width: pageTurnEnabled ? `${100 / effectiveScale}%` : '100%',
                 transform: pageTurnEnabled ? `scale(${effectiveScale})` : 'none',
-                transformOrigin: 'top center',
+                transformOrigin: 'top left',
               }}
             >
               {renderBgPages()}
@@ -1055,6 +1066,18 @@ export default function MenuEditor() {
 
               {/* ✅ 편집 메뉴 */}
               {edit && !preview && !isOverlayOpen && (
+                <div style={styles.editorMenuBar} onMouseDown={(e) => e.stopPropagation()}>
+                  <button
+                    style={styles.menuBtnDark}
+                    onClick={() => setShowEditorMenu((prev) => !prev)}
+                  >
+                    {T.editorMenu}
+                  </button>
+                  </div>
+              )}
+
+              {/* ✅ 편집 메뉴 (토글) */}
+              {edit && showEditorMenu && !preview && !isOverlayOpen && (
                 <div style={styles.editMenu} onMouseDown={(e) => e.stopPropagation()}>
                   <button
                     style={styles.menuBtn}
@@ -1697,8 +1720,9 @@ const styles = {
 
   langWrap: {
     position: 'fixed',
-    top: 16,
-    right: 16,
+    top: 'calc(env(safe-area-inset-top, 0px) + 10px)',
+    left: '50%',
+    transform: 'translateX(-50%)',
     zIndex: 99999,
     display: 'flex',
     gap: 8,
@@ -1720,9 +1744,16 @@ const styles = {
     background: 'rgba(0,0,0,0.65)',
   },
 
+  editorMenuBar: {
+    position: 'fixed',
+    top: 'calc(env(safe-area-inset-top, 0px) + 66px)',
+    right: 16,
+    zIndex: 99998,
+  },
+
   editMenu: {
     position: 'fixed',
-    top: 56,
+    top: 'calc(env(safe-area-inset-top, 0px) + 110px)',
     right: 16,
     zIndex: 99999,
     display: 'flex',
