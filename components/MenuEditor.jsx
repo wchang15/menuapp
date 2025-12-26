@@ -4,8 +4,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { KEYS, loadBlob, saveBlob, loadJson, saveJson } from '@/lib/storage';
 import CustomCanvas from './CustomCanvas';
+import TemplateCanvas from './TemplateCanvas';
 
-const DEFAULT_LAYOUT = { mode: null, templateId: null, items: [] };
+const DEFAULT_LAYOUT = { mode: null, templateId: null, items: [], templateData: null };
 
 // ✅ 옵션들
 const SECRET_TAPS = 5;
@@ -21,30 +22,171 @@ const DEFAULT_PIN = '0000';
 const LANG_KEY = 'APP_LANG_V1';
 
 // ✅ “페이지” 단위(편집용)
-const PAGE_HEIGHT = 2200; // 1페이지 기준 높이
-const PAGE_GAP = 40;      // 페이지 사이 간격(시각적 구분)
-const MIN_CONTENT_HEIGHT = PAGE_HEIGHT; // 아이템이 없어도 최소 1페이지
+const PAGE_HEIGHT = 2200;
+const PAGE_GAP = 40;
+const MIN_CONTENT_HEIGHT = PAGE_HEIGHT;
+
+// ✅ TemplateCanvas와 페이지 계산 "완전 동일"하게 만들기 위한 상수
+const DEFAULT_ROW_H = 92;
+const DEFAULT_HEADER_H = 210;
+const DEFAULT_PAGE_PADDING_TOP = 70;
+
+// ✅ T2 사진 슬롯과 동일
+const MAX_PHOTOS = 8;
+
+// ✅✅ 페이지별 배경 오버라이드 저장 키(추가)
+const BG_OVERRIDES_KEY = 'MENU_BG_OVERRIDES_V1';
+// 각 페이지 blob 키: `${KEYS.MENU_BG}__P${page}`
+const bgPageKey = (page) => `${KEYS.MENU_BG}__P${page}`;
+
+function clampNum(v, min, max) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return min;
+  return Math.max(min, Math.min(max, n));
+}
+function estimateRowH(style) {
+  const ls = clampNum(style?.lineSpacing ?? 1.12, 0.9, 1.6);
+  return Math.round(DEFAULT_ROW_H * (0.9 + (ls - 0.9) * 0.8));
+}
+function estimateHeaderH(style) {
+  const ls = clampNum(style?.lineSpacing ?? 1.12, 0.9, 1.6);
+  return Math.round(DEFAULT_HEADER_H * (0.95 + (ls - 0.9) * 0.35));
+}
+
+function normalizeTemplateDataForMeasure(templateId, data, lang) {
+  if (!data) return { style: {}, rows: [], cells: [], columns: 2 };
+
+  const baseStyle = {
+    lineSpacing: 1.12,
+    rowGap: 14,
+  };
+  const style = { ...baseStyle, ...(data.style || {}) };
+
+  const group = (templateId || '').slice(0, 2);
+
+  if (group === 'T1') {
+    return { style, rows: Array.isArray(data.rows) ? data.rows : [] };
+  }
+  if (group === 'T2') {
+    let photos = Array.isArray(data.photos)
+      ? [...data.photos]
+      : data.photoSrc
+      ? [data.photoSrc]
+      : [];
+    while (photos.length < MAX_PHOTOS) photos.push(null);
+    photos = photos.slice(0, MAX_PHOTOS);
+
+    return { style, rows: Array.isArray(data.rows) ? data.rows : [], photos };
+  }
+
+  return {
+    style,
+    columns: clampNum(data.columns ?? 2, 2, 3),
+    cells: Array.isArray(data.cells) ? data.cells : [],
+  };
+}
+
+/**
+ * ✅ template 페이지수 계산을 TemplateCanvas와 동일하게 맞춤.
+ */
+function computeTemplatePages(templateId, templateData, lang) {
+  const id = templateId || '';
+  const group = id.slice(0, 2); // T1/T2/T3
+  const variant = id.slice(2, 3) || 'A';
+
+  const td = normalizeTemplateDataForMeasure(id, templateData, lang);
+  const style = td?.style || {};
+  const headerH = estimateHeaderH(style);
+
+  if (group === 'T1') {
+    const rows = Array.isArray(td.rows) ? td.rows : [];
+    const rowH = estimateRowH(style);
+
+    const paddingTop = DEFAULT_PAGE_PADDING_TOP;
+    const usableH = PAGE_HEIGHT - paddingTop - 80;
+
+    const perPage = Math.max(
+      1,
+      Math.floor((usableH - headerH) / (rowH + (style.rowGap || 14)))
+    );
+    return Math.max(1, Math.ceil((rows.length || 0) / perPage) || 1);
+  }
+
+  if (group === 'T2') {
+    const rows = Array.isArray(td.rows) ? td.rows : [];
+
+    const paddingTop = 70;
+    const usableH = PAGE_HEIGHT - paddingTop - 80;
+
+    const ITEMS_PER_BLOCK = variant === 'B' ? 3 : 4;
+
+    const targetBlocksPerPage = 3.5; // 3~4
+    const available = Math.max(400, usableH - headerH - 24);
+    const blockGap = variant === 'A' ? 18 : variant === 'B' ? 16 : 20;
+
+    const blockH = Math.floor(
+      (available - blockGap * (Math.ceil(targetBlocksPerPage) - 1)) / targetBlocksPerPage
+    );
+    const blocksPerPage = clampNum(
+      Math.floor((available + blockGap) / (blockH + blockGap)),
+      3,
+      4
+    );
+
+    const blocks = Math.max(1, Math.ceil((rows.length || 0) / ITEMS_PER_BLOCK));
+    return Math.max(1, Math.ceil(blocks / blocksPerPage));
+  }
+
+  // T3
+  const cells = Array.isArray(td.cells) ? td.cells : [];
+  const col = Math.max(2, Math.min(3, Number(td.columns) || 2));
+
+  const paddingTop = 70;
+  const usableH = PAGE_HEIGHT - paddingTop - 80;
+
+  const cardH = variant === 'A' ? 172 : variant === 'B' ? 160 : 188;
+  const gap = variant === 'A' ? 18 : variant === 'B' ? 14 : 22;
+
+  const rowsPerPage = Math.max(1, Math.floor((usableH - headerH) / (cardH + gap)));
+  const perPage = rowsPerPage * col;
+
+  return Math.max(1, Math.ceil((cells.length || 0) / perPage) || 1);
+}
 
 function TemplatePicker({ onPick, lang }) {
   const title = lang === 'ko' ? '템플릿 선택' : 'Select template';
-  const note =
-    lang === 'ko'
-      ? '* 템플릿은 다음 단계에서 입력 UI를 붙일 예정입니다.'
-      : '* We will add input UI in the next step.';
 
-  const t1 = lang === 'ko' ? '리스트형' : 'List';
-  const t2 = lang === 'ko' ? '사진 + 리스트' : 'Photo + List';
-  const t3 = lang === 'ko' ? '그리드형' : 'Grid';
+  const groups = [
+    { id: 'T1', name: lang === 'ko' ? '리스트' : 'List', variants: ['A', 'B', 'C'] },
+    { id: 'T2', name: lang === 'ko' ? '사진 + 리스트' : 'Photo + List', variants: ['A', 'B', 'C'] },
+    { id: 'T3', name: lang === 'ko' ? '그리드' : 'Grid', variants: ['A', 'B', 'C'] },
+  ];
 
   return (
     <div>
       <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 12 }}>{title}</div>
-      <div style={{ display: 'grid', gap: 10 }}>
-        <button style={tpBtn} onClick={() => onPick('T1')}>{t1}</button>
-        <button style={tpBtn} onClick={() => onPick('T2')}>{t2}</button>
-        <button style={tpBtn} onClick={() => onPick('T3')}>{t3}</button>
+
+      <div style={{ display: 'grid', gap: 12 }}>
+        {groups.map((g) => (
+          <div key={g.id} style={{ display: 'grid', gap: 8 }}>
+            <div style={{ fontWeight: 900, opacity: 0.85 }}>{g.name}</div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+              {g.variants.map((v) => (
+                <button key={v} style={tpBtn} onClick={() => onPick(`${g.id}${v}`)}>
+                  {g.id}-{v}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
-      <div style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>{note}</div>
+
+      <div style={{ marginTop: 10, fontSize: 12, opacity: 0.7 }}>
+        {lang === 'ko'
+          ? '* 이후에도 템플릿 입력 패널에서 스타일/크기/색상 조절 가능'
+          : '* You can still adjust style/size/colors in the template panel.'}
+      </div>
     </div>
   );
 }
@@ -61,7 +203,12 @@ const tpBtn = {
 export default function MenuEditor() {
   const router = useRouter();
 
+  // ✅ 기본 배경(전체 페이지 default)
   const [bgBlob, setBgBlob] = useState(null);
+
+  // ✅ 페이지별 오버라이드 배경 blobs: { [pageNumber]: Blob }
+  const [bgOverrides, setBgOverrides] = useState({});
+
   const [layout, setLayout] = useState(DEFAULT_LAYOUT);
 
   // ✅ “편집 모드”
@@ -71,6 +218,8 @@ export default function MenuEditor() {
   const [preview, setPreview] = useState(false);
 
   const fileInputRef = useRef(null);
+  const pageBgInputRef = useRef(null);
+
   const [dragOver, setDragOver] = useState(false);
 
   // ✅ 보기모드에서만 잠깐 보이는 “수정 버튼” 상태
@@ -86,10 +235,10 @@ export default function MenuEditor() {
   // ---- 길게 누르기 타이머
   const longPressRef = useRef(null);
 
-  // ✅ stage 스크롤 ref (CustomCanvas 드래그 자동 스크롤용)
+  // ✅ stage 스크롤 ref
   const stageScrollRef = useRef(null);
 
-  // ✅ 편집 방식 변경 모달(편집 중에도)
+  // ✅ 편집 방식 변경 모달
   const [editModeModalOpen, setEditModeModalOpen] = useState(false);
 
   // ✅ PIN 상태
@@ -115,12 +264,48 @@ export default function MenuEditor() {
   const [pageView, setPageView] = useState(true);
   const [pageIndex, setPageIndex] = useState(1);
 
+  // ✅ 템플릿 입력 패널 숨김/표시
+  const [tplPanelOpen, setTplPanelOpen] = useState(true);
+
+  // ✅ 페이지 배경 설정 모달
+  const [pageBgModalOpen, setPageBgModalOpen] = useState(false);
+
+  // ✅ (핵심) 스크롤을 확실히 0으로 리셋하는 함수
+  const hardResetScrollTop = (behavior = 'auto') => {
+    const sc = stageScrollRef.current;
+    if (!sc) return;
+    sc.scrollTo({ top: 0, behavior });
+  };
+
   useEffect(() => {
     (async () => {
       const bg = await loadBlob(KEYS.MENU_BG);
       const lay = (await loadJson(KEYS.MENU_LAYOUT)) || DEFAULT_LAYOUT;
       if (bg) setBgBlob(bg);
-      setLayout(lay);
+
+      const safeLay = {
+        ...DEFAULT_LAYOUT,
+        ...(lay || {}),
+        templateData: lay?.templateData ?? null,
+      };
+      setLayout(safeLay);
+
+      // ✅ 페이지별 배경 오버라이드 로드
+      try {
+        const overrides = (await loadJson(BG_OVERRIDES_KEY)) || {};
+        const pages = Object.keys(overrides || {});
+        const map = {};
+        for (const p of pages) {
+          const pn = Number(p);
+          if (!Number.isFinite(pn) || pn < 1) continue;
+          const blob = await loadBlob(bgPageKey(pn));
+          if (blob) map[pn] = blob;
+        }
+        setBgOverrides(map);
+      } catch {}
+
+      // ✅ 로드 직후 스크롤 잔상 방지
+      setTimeout(() => hardResetScrollTop('auto'), 0);
     })();
 
     // ✅ PIN 로드/초기화
@@ -143,29 +328,110 @@ export default function MenuEditor() {
     } catch {}
   }, []);
 
+  // ✅ (백업) Shift+E 누르면 edit 버튼 강제 노출 (버튼만, 실제 편집은 PIN 필요)
+  useEffect(() => {
+    const onKey = (e) => {
+      if (edit || preview) return;
+      if (e.key?.toLowerCase() === 'e' && e.shiftKey) {
+        revealEditButton();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [edit, preview]);
+
   const setLanguage = (next) => {
     setLang(next);
-    try { localStorage.setItem(LANG_KEY, next); } catch {}
+    try {
+      localStorage.setItem(LANG_KEY, next);
+    } catch {}
   };
 
   // ✅ 영상으로 돌아가기
   const goIntro = () => router.push('/intro');
 
+  // ✅ 기본 배경 URL
   const bgUrl = useMemo(() => {
     if (!bgBlob) return null;
     return URL.createObjectURL(bgBlob);
   }, [bgBlob]);
 
+  // ✅ 페이지별 배경 URL map
+  const bgOverrideUrls = useMemo(() => {
+    const map = {};
+    for (const [k, blob] of Object.entries(bgOverrides || {})) {
+      if (blob) map[k] = URL.createObjectURL(blob);
+    }
+    return map;
+  }, [bgOverrides]);
+
+  // ✅ URL revoke cleanup
   useEffect(() => {
     return () => {
       if (bgUrl) URL.revokeObjectURL(bgUrl);
+      for (const u of Object.values(bgOverrideUrls || {})) {
+        try {
+          URL.revokeObjectURL(u);
+        } catch {}
+      }
     };
+  }, [bgUrl, bgOverrideUrls]);
+
+  // ✅ 배경이 세팅되면 무조건 맨위로 (2페이지 잔상 방지)
+  useEffect(() => {
+    if (!bgUrl) return;
+    setTimeout(() => hardResetScrollTop('auto'), 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bgUrl]);
 
   const uploadBg = async (file) => {
     if (!file) return;
     await saveBlob(KEYS.MENU_BG, file);
     setBgBlob(file);
+    // ✅ 업로드 즉시 맨위로
+    setTimeout(() => hardResetScrollTop('auto'), 0);
+  };
+
+  // ✅ 페이지 배경 업로드(현재 pageIndex)
+  const uploadPageBg = async (file, pageNum) => {
+    const p = Number(pageNum);
+    if (!file || !Number.isFinite(p) || p < 1) return;
+
+    await saveBlob(bgPageKey(p), file);
+
+    setBgOverrides((prev) => ({ ...(prev || {}), [p]: file }));
+
+    // overrides 인덱스 저장(삭제 함수 없으니 "사용 여부"만 관리)
+    try {
+      const nextIndex = { ...(await loadJson(BG_OVERRIDES_KEY)) };
+      nextIndex[p] = true;
+      await saveJson(BG_OVERRIDES_KEY, nextIndex);
+    } catch {
+      try {
+        await saveJson(BG_OVERRIDES_KEY, { [p]: true });
+      } catch {}
+    }
+  };
+
+  // ✅ 페이지 배경 오버라이드 해제(기본 배경으로 돌아감)
+  const clearPageBgOverride = async (pageNum) => {
+    const p = Number(pageNum);
+    if (!Number.isFinite(p) || p < 1) return;
+
+    setBgOverrides((prev) => {
+      const next = { ...(prev || {}) };
+      delete next[p];
+      return next;
+    });
+
+    try {
+      const idx = (await loadJson(BG_OVERRIDES_KEY)) || {};
+      const nextIdx = { ...(idx || {}) };
+      delete nextIdx[p];
+      await saveJson(BG_OVERRIDES_KEY, nextIdx);
+    } catch {}
+    // blob 자체는 저장소에 남을 수 있음(삭제 API 없어서). 기능상 문제 없음.
   };
 
   const onDrop = async (e) => {
@@ -176,6 +442,7 @@ export default function MenuEditor() {
   };
 
   const openFilePicker = () => fileInputRef.current?.click();
+  const openPageBgPicker = () => pageBgInputRef.current?.click();
 
   // ✅ 타이머 정리 + 보기모드에서 수정 버튼 숨김
   const hideEditButton = () => {
@@ -266,6 +533,8 @@ export default function MenuEditor() {
       setPreview(false);
       setPinInput('');
       setPinError('');
+      // ✅ edit 진입 시 스크롤 맨위로
+      setTimeout(() => hardResetScrollTop('auto'), 0);
       return;
     }
     setPinError(lang === 'ko' ? '비밀번호가 올바르지 않습니다.' : 'Incorrect PIN.');
@@ -296,7 +565,9 @@ export default function MenuEditor() {
       return;
     }
 
-    try { localStorage.setItem(PIN_KEY, np); } catch {}
+    try {
+      localStorage.setItem(PIN_KEY, np);
+    } catch {}
     setPin(np);
     setSettingsMsg(lang === 'ko' ? '비밀번호가 변경되었습니다.' : 'PIN has been updated.');
     setCurPinInput('');
@@ -317,7 +588,8 @@ export default function MenuEditor() {
       hint: '권장: JPG/PNG · 가로형(16:9)',
       keep: '* 배경은 브라우저에 저장되어 다음 실행에도 유지됩니다.',
       edit: '수정',
-      changeBg: '배경 다시 선택',
+      changeBg: '배경(전체) 선택',
+      pageBg: '페이지 배경',
       pinSettings: '비밀번호 설정',
       pinEnterTitle: '비밀번호 입력',
       pinEnterDesc: '수정하려면 비밀번호(기본 0000)를 입력하세요.',
@@ -329,14 +601,13 @@ export default function MenuEditor() {
       newPin: '새 비밀번호(4자리 숫자)',
       newPin2: '새 비밀번호 확인',
       change: '변경',
-      help: '우측 상단 모서리를 5번 클릭하거나 3초 길게 누르면 수정 버튼이 나타납니다. (5초 후 자동으로 숨김)',
+      help: '우측 상단 모서리를 5번 클릭하거나 3초 길게 누르면 수정 버튼이 나타납니다. (5초 후 자동으로 숨김)\n*백업: Shift+E',
       backToVideo: '영상으로',
       editModePick: '수정 방식 선택',
       freeEdit: '자유 배치로 편집하기',
       templateBadge: '템플릿 모드: ',
       changeMode: '편집 방식 변경',
 
-      // ✅ 페이지 UI
       pageView: '페이지 보기',
       continuous: '연속 보기',
       page: '페이지',
@@ -344,10 +615,19 @@ export default function MenuEditor() {
       next: '다음',
       jump: '이동',
 
-      // ✅ 미리보기
       preview: '미리보기',
       save: '저장',
       back: '뒤로가기',
+
+      showTplPanel: '템플릿 입력 열기',
+
+      // page bg modal
+      pageBgTitle: '페이지별 배경 설정',
+      currentPage: '현재 페이지',
+      uploadThis: '이 페이지 배경 업로드',
+      clearThis: '이 페이지 배경 해제(기본으로)',
+      usingOverride: '이 페이지는 오버라이드 배경 사용 중',
+      usingDefault: '이 페이지는 기본 배경 사용 중',
     },
     en: {
       pickBgTitle: 'Select a menu background',
@@ -361,7 +641,8 @@ export default function MenuEditor() {
       hint: 'Recommended: JPG/PNG · Landscape (16:9)',
       keep: '* Saved in your browser and will persist.',
       edit: 'Edit',
-      changeBg: 'Change Background',
+      changeBg: 'Background (All Pages)',
+      pageBg: 'Page Background',
       pinSettings: 'PIN Settings',
       pinEnterTitle: 'Enter PIN',
       pinEnterDesc: 'Enter your PIN (default 0000) to edit.',
@@ -373,14 +654,13 @@ export default function MenuEditor() {
       newPin: 'New PIN (4 digits)',
       newPin2: 'Confirm New PIN',
       change: 'Update',
-      help: 'Tap the top-right corner 5 times or press & hold for 3 seconds to reveal the Edit button. (Auto hides in 5s)',
+      help: 'Tap the top-right corner 5 times or press & hold for 3 seconds to reveal the Edit button. (Auto hides in 5s)\n*Backup: Shift+E',
       backToVideo: 'Back to Video',
       editModePick: 'Choose edit mode',
       freeEdit: 'Edit with Free Layout',
       templateBadge: 'Template Mode: ',
       changeMode: 'Change Edit Mode',
 
-      // ✅ Page UI
       pageView: 'Page View',
       continuous: 'Continuous',
       page: 'Page',
@@ -388,46 +668,92 @@ export default function MenuEditor() {
       next: 'Next',
       jump: 'Go',
 
-      // ✅ Preview
       preview: 'Preview',
       save: 'Save',
       back: 'Back',
+
+      showTplPanel: 'Show Template Input',
+
+      pageBgTitle: 'Per-page Background',
+      currentPage: 'Current page',
+      uploadThis: 'Upload background for this page',
+      clearThis: 'Clear this page override (use default)',
+      usingOverride: 'This page is using an override background',
+      usingDefault: 'This page is using the default background',
     },
   }[lang];
 
-  const isOverlayOpen = pinModalOpen || settingsOpen || editModeModalOpen;
+  const isOverlayOpen = pinModalOpen || settingsOpen || editModeModalOpen || pageBgModalOpen;
 
-  // ✅ 아이템 위치에 따라 “컨텐츠 높이” 자동 계산 → 아래로 내리면 더 이상 안 짤림
-  const contentHeight = useMemo(() => {
+  // ✅ 페이지 계산
+  const computedPages = useMemo(() => {
+    // ---------- TEMPLATE MODE ----------
+    if (layout?.mode === 'template') {
+      const tid = layout?.templateId || '';
+      const td = normalizeTemplateDataForMeasure(tid, layout?.templateData, lang);
+
+      const isEmpty = tid.startsWith('T1')
+        ? (td?.rows?.length ?? 0) === 0
+        : tid.startsWith('T2')
+        ? (td?.rows?.length ?? 0) === 0
+        : (td?.cells?.length ?? 0) === 0;
+
+      if (isEmpty) return 1;
+
+      const pages = computeTemplatePages(tid, layout?.templateData, lang);
+      return Math.max(1, pages);
+    }
+
+    // ---------- CUSTOM MODE ----------
     const items = Array.isArray(layout?.items) ? layout.items : [];
+    if (items.length === 0) return 1;
+
     let maxBottom = 0;
     for (const it of items) {
       const b = (it?.y || 0) + (it?.h || 0);
       if (b > maxBottom) maxBottom = b;
     }
-    const needed = Math.ceil(maxBottom + 240); // 여유 padding
-    return Math.max(MIN_CONTENT_HEIGHT, needed);
-  }, [layout]);
 
-  // ✅ 총 페이지 수(아이템이 없어도 1페이지)
-  const totalPages = useMemo(() => {
-    return Math.max(1, Math.ceil(contentHeight / PAGE_HEIGHT));
-  }, [contentHeight]);
+    const needed = Math.max(MIN_CONTENT_HEIGHT, Math.ceil(maxBottom + 240));
+    const unit = PAGE_HEIGHT + PAGE_GAP;
+    const pages = Math.max(1, Math.ceil((needed + PAGE_GAP) / unit));
+    return pages;
+  }, [layout, lang]);
 
-  // ✅ 스크롤 전체 높이(페이지 간격 포함)
-  const fullScrollHeight = useMemo(() => {
-    if (totalPages <= 1) return contentHeight;
-    return Math.max(contentHeight, totalPages * PAGE_HEIGHT + (totalPages - 1) * PAGE_GAP);
-  }, [contentHeight, totalPages]);
+  const totalPages = useMemo(() => Math.max(1, Number(computedPages || 1)), [computedPages]);
 
-  // ✅ pageIndex 보정
+  // ✅ 컨텐츠 높이
+  const contentHeight = useMemo(() => {
+    const pages = Math.max(1, Number(totalPages || 1));
+    const base = pages * PAGE_HEIGHT + (pages - 1) * PAGE_GAP;
+
+    // ✅ Custom 편집 중엔 1페이지 여유(드래그로 2페이지 생성 가능)
+    const extra = edit && !preview && layout?.mode === 'custom' ? PAGE_HEIGHT : 0;
+
+    return Math.max(MIN_CONTENT_HEIGHT, base + extra);
+  }, [totalPages, edit, preview, layout?.mode]);
+
+  const fullScrollHeight = useMemo(() => contentHeight, [contentHeight]);
+
+  // ✅ totalPages가 줄었을 때, 화면이 2페이지 위치에 남아있으면 무조건 맨 위로
+  useEffect(() => {
+    const sc = stageScrollRef.current;
+    if (!sc) return;
+
+    const maxTop = Math.max(0, (totalPages - 1) * (PAGE_HEIGHT + PAGE_GAP));
+    if (sc.scrollTop > maxTop + 8) {
+      hardResetScrollTop('auto');
+      setPageIndex(1);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [totalPages]);
+
   useEffect(() => {
     if (pageIndex > totalPages) setPageIndex(totalPages);
     if (pageIndex < 1) setPageIndex(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [totalPages]);
 
-  // ✅ 페이지로 점프
   const scrollToPage = (pi) => {
     const sc = stageScrollRef.current;
     if (!sc) return;
@@ -436,7 +762,6 @@ export default function MenuEditor() {
     sc.scrollTo({ top, behavior: 'smooth' });
   };
 
-  // ✅ pageView 켰을 때 페이지 바뀌면 자동 점프 (편집 + 미리보기 아님)
   useEffect(() => {
     if (!edit) return;
     if (preview) return;
@@ -445,27 +770,65 @@ export default function MenuEditor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageIndex, edit, pageView, preview]);
 
-  // ✅ 편집 시작하면 기본: 페이지 보기 ON
   useEffect(() => {
     if (edit) {
       setPageView(true);
       setPageIndex(1);
       setPreview(false);
+      setTplPanelOpen(true);
+      setTimeout(() => hardResetScrollTop('auto'), 0);
     } else {
       setPreview(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [edit]);
 
   const handleSaveAll = async () => {
-    const next = { ...layout, mode: 'custom' };
+    const next = { ...layout };
     setLayout(next);
     await saveJson(KEYS.MENU_LAYOUT, next);
+
     setPreview(false);
     setEdit(false);
     hideEditButton();
+    setTimeout(() => hardResetScrollTop('auto'), 0);
   };
 
   const handleExitPreview = () => setPreview(false);
+
+  // ✅✅ 배경 렌더: 페이지별 오버라이드가 있으면 그거, 없으면 default(bgUrl)
+  const renderBgPages = () => {
+    if (!bgUrl) return null;
+
+    return Array.from({ length: totalPages }).map((_, i) => {
+      const pageNum = i + 1;
+      const overrideUrl = bgOverrideUrls?.[String(pageNum)] || bgOverrideUrls?.[pageNum];
+      const useUrl = overrideUrl || bgUrl;
+
+      const top = i * (PAGE_HEIGHT + PAGE_GAP);
+      return (
+        <div
+          key={i}
+          style={{
+            position: 'absolute',
+            left: 0,
+            right: 0,
+            top,
+            height: PAGE_HEIGHT,
+            backgroundImage: `url(${useUrl})`,
+            backgroundRepeat: 'no-repeat',
+            backgroundPosition: 'top center',
+            backgroundSize: '100% 100%',
+            backgroundAttachment: 'scroll',
+            zIndex: 0,
+            pointerEvents: 'none',
+          }}
+        />
+      );
+    });
+  };
+
+  const hasOverrideThisPage = !!bgOverrides?.[pageIndex];
 
   return (
     <div style={styles.container}>
@@ -474,14 +837,19 @@ export default function MenuEditor() {
           <div style={styles.setupCard}>
             <div style={styles.title}>{T.pickBgTitle}</div>
             <div style={styles.desc}>
-              {T.pickBgDesc1}<b>{T.pickBgDesc2}</b>{T.pickBgDesc3}
+              {T.pickBgDesc1}
+              <b>{T.pickBgDesc2}</b>
+              {T.pickBgDesc3}
               <br />
               {T.pickBgDesc4}
             </div>
 
             <div
               style={{ ...styles.dropZone, ...(dragOver ? styles.dropZoneActive : {}) }}
-              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragOver(true);
+              }}
               onDragLeave={() => setDragOver(false)}
               onDrop={onDrop}
               onClick={openFilePicker}
@@ -509,18 +877,10 @@ export default function MenuEditor() {
           </div>
         </div>
       ) : (
-        // ✅ stage 자체가 스크롤 컨테이너
         <div ref={stageScrollRef} style={styles.stage}>
           <div style={{ ...styles.page, height: fullScrollHeight }}>
-            {/* ✅ 배경: repeat-y 타일 */}
-            <div
-              style={{
-                ...styles.bgTile,
-                backgroundImage: `url(${bgUrl})`,
-              }}
-            />
+            {renderBgPages()}
 
-            {/* ✅ 페이지 경계선 표시(편집 중 && 미리보기 아닐 때) */}
             {edit && !preview && (
               <>
                 {Array.from({ length: totalPages - 1 }).map((_, i) => {
@@ -546,7 +906,6 @@ export default function MenuEditor() {
               </>
             )}
 
-            {/* ✅ 언어(국기) — 메뉴 화면에서도 항상 보이기 (단, 미리보기/모달에서는 숨김) */}
             {!isOverlayOpen && !preview && (
               <div style={styles.langWrap}>
                 <button
@@ -568,14 +927,20 @@ export default function MenuEditor() {
               </div>
             )}
 
-            {/* ✅ 국기 아래 세로 메뉴: (편집 중 && 미리보기 아님) */}
             {edit && !preview && !isOverlayOpen && (
               <div style={styles.editMenu} onMouseDown={(e) => e.stopPropagation()}>
                 <button
                   style={styles.menuBtn}
-                  onClick={() => setEditModeModalOpen(true)}
+                  onClick={() => {
+                    setTplPanelOpen(false);
+                    setEditModeModalOpen(true);
+                  }}
                 >
                   {T.changeMode}
+                </button>
+
+                <button style={styles.menuBtn} onClick={() => setPageBgModalOpen(true)}>
+                  {T.pageBg}
                 </button>
 
                 <button
@@ -597,6 +962,7 @@ export default function MenuEditor() {
                   {T.preview}
                 </button>
 
+                {/* 전체 배경 */}
                 <input
                   ref={fileInputRef}
                   type="file"
@@ -607,7 +973,6 @@ export default function MenuEditor() {
               </div>
             )}
 
-            {/* ✅ 미리보기 모드: 저장/뒤로가기만 */}
             {edit && preview && !isOverlayOpen && (
               <div style={styles.previewBar} onMouseDown={(e) => e.stopPropagation()}>
                 <button style={styles.menuBtnDark} onClick={handleSaveAll}>
@@ -619,14 +984,13 @@ export default function MenuEditor() {
               </div>
             )}
 
-            {/* ✅ 뒤로가기(영상으로): 모달/설정/편집/미리보기에서는 숨김 */}
             {!isOverlayOpen && !edit && !preview && (
               <button style={styles.backBtn} onClick={goIntro}>
                 {T.backToVideo}
               </button>
             )}
 
-            {/* ✅ 비밀 hotspot (편집 아니고, 수정버튼 안 보일 때만 / 미리보기 제외) */}
+            {/* ✅ secret hotspot */}
             {!showEditBtn && !edit && !preview && (
               <div
                 style={styles.secretHotspot}
@@ -641,14 +1005,9 @@ export default function MenuEditor() {
               />
             )}
 
-            {/* ✅ NEW: 편집 중 페이지 컨트롤(연속 보기/이전/다음/이동) - 미리보기에서는 숨김 */}
             {edit && !preview && (
               <div style={styles.pageCtrl} onMouseDown={(e) => e.stopPropagation()}>
-                <button
-                  style={styles.pageCtrlBtn}
-                  onClick={() => setPageView((v) => !v)}
-                  title="toggle page view"
-                >
+                <button style={styles.pageCtrlBtn} onClick={() => setPageView((v) => !v)}>
                   {pageView ? T.continuous : T.pageView}
                 </button>
 
@@ -682,16 +1041,12 @@ export default function MenuEditor() {
                   {T.next}
                 </button>
 
-                <button
-                  style={styles.pageCtrlBtn}
-                  onClick={() => scrollToPage(pageIndex)}
-                >
+                <button style={styles.pageCtrlBtn} onClick={() => scrollToPage(pageIndex)}>
                   {T.jump}
                 </button>
               </div>
             )}
 
-            {/* ✅ 보기모드에서만 “수정” 버튼 노출 (미리보기 제외) */}
             {!edit && !preview && showEditBtn && !isOverlayOpen && (
               <button
                 style={styles.editBtn}
@@ -704,12 +1059,52 @@ export default function MenuEditor() {
               </button>
             )}
 
-            {!layout.mode && !preview && (
-              <div style={styles.helpHint}>{T.help}</div>
-            )}
+            {!layout.mode && !preview && <div style={styles.helpHint}>{T.help}</div>}
 
             {layout.mode === 'template' && !preview && (
-              <div style={styles.badge}>{T.templateBadge}{layout.templateId}</div>
+              <div style={styles.badge}>
+                {T.templateBadge}
+                {layout.templateId}
+              </div>
+            )}
+
+            {layout.mode === 'template' && edit && !preview && !isOverlayOpen && !tplPanelOpen && (
+              <button style={styles.tplShowBtn} onClick={() => setTplPanelOpen(true)}>
+                {T.showTplPanel}
+              </button>
+            )}
+
+            {layout.mode === 'template' && (
+              <TemplateCanvas
+                lang={lang}
+                editing={edit}
+                uiMode={preview ? 'preview' : 'edit'}
+                panelOpen={tplPanelOpen}
+                onTogglePanel={(open) => setTplPanelOpen(open)}
+                pageHeight={PAGE_HEIGHT}
+                pageGap={PAGE_GAP}
+                fullScrollHeight={fullScrollHeight}
+                templateId={layout.templateId}
+                data={layout.templateData}
+                onChange={(nextData) => {
+                  const next = { ...layout, mode: 'template', templateData: nextData };
+                  setLayout(next);
+                  saveJson(KEYS.MENU_LAYOUT, next);
+
+                  setTimeout(() => {
+                    const sc = stageScrollRef.current;
+                    if (!sc) return;
+                    const maxTop = Math.max(0, (totalPages - 1) * (PAGE_HEIGHT + PAGE_GAP));
+                    if (sc.scrollTop > maxTop + 8) hardResetScrollTop('auto');
+                  }, 0);
+                }}
+                onCancel={() => {
+                  setPreview(false);
+                  setEdit(false);
+                  hideEditButton();
+                  setTimeout(() => hardResetScrollTop('auto'), 0);
+                }}
+              />
             )}
 
             {layout.mode === 'custom' && (
@@ -718,7 +1113,7 @@ export default function MenuEditor() {
                 inspectorTop={118}
                 items={layout.items}
                 editing={edit}
-                uiMode={preview ? 'preview' : 'edit'}   // ✅ 핵심: preview면 UI/인터랙션 싹 OFF
+                uiMode={preview ? 'preview' : 'edit'}
                 scrollRef={stageScrollRef}
                 onChangeItems={(items) => {
                   const next = { ...layout, mode: 'custom', items };
@@ -732,33 +1127,50 @@ export default function MenuEditor() {
                   setPreview(false);
                   setEdit(false);
                   hideEditButton();
+                  setTimeout(() => hardResetScrollTop('auto'), 0);
                 }}
                 onCancel={() => {
                   setPreview(false);
                   setEdit(false);
                   hideEditButton();
+                  setTimeout(() => hardResetScrollTop('auto'), 0);
                 }}
               />
             )}
 
             {/* ✅ 최초 편집 모드 선택 모달 */}
-            {edit && !preview && layout.mode !== 'custom' && (
-              <div style={styles.modalBg} onClick={() => { setEdit(false); setPreview(false); hideEditButton(); }}>
+            {edit && !preview && layout.mode !== 'custom' && layout.mode !== 'template' && (
+              <div
+                style={styles.modalBg}
+                onClick={() => {
+                  setEdit(false);
+                  setPreview(false);
+                  hideEditButton();
+                  setTimeout(() => hardResetScrollTop('auto'), 0);
+                }}
+              >
                 <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-                  <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 10 }}>
-                    {T.editModePick}
-                  </div>
+                  <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 10 }}>{T.editModePick}</div>
 
                   <TemplatePicker
                     lang={lang}
-                    onPick={(id) => {
-                      const next = { ...layout, mode: 'template', templateId: id };
+                    onPick={(fullId) => {
+                      const initTemplateData = makeInitialTemplateData(fullId, lang);
+
+                      const next = {
+                        ...layout,
+                        mode: 'template',
+                        templateId: fullId,
+                        templateData: initTemplateData,
+                        items: [],
+                      };
                       setLayout(next);
                       saveJson(KEYS.MENU_LAYOUT, next);
 
-                      setEdit(false);
+                      setEdit(true);
                       setPreview(false);
-                      hideEditButton();
+                      setTplPanelOpen(true);
+                      setTimeout(() => hardResetScrollTop('auto'), 0);
                     }}
                   />
 
@@ -767,11 +1179,12 @@ export default function MenuEditor() {
                   <button
                     style={styles.primaryBtn}
                     onClick={() => {
-                      const next = { ...layout, mode: 'custom', templateId: null };
+                      const next = { ...layout, mode: 'custom', templateId: null, templateData: null };
                       setLayout(next);
                       saveJson(KEYS.MENU_LAYOUT, next);
                       setEdit(true);
                       setPreview(false);
+                      setTimeout(() => hardResetScrollTop('auto'), 0);
                     }}
                   >
                     {T.freeEdit}
@@ -783,6 +1196,7 @@ export default function MenuEditor() {
                       setEdit(false);
                       setPreview(false);
                       hideEditButton();
+                      setTimeout(() => hardResetScrollTop('auto'), 0);
                     }}
                   >
                     {T.close}
@@ -793,22 +1207,29 @@ export default function MenuEditor() {
 
             {/* ✅ 편집 중에도 전환 가능한 "편집 방식 변경" 모달 */}
             {edit && !preview && editModeModalOpen && (
-              <div
-                style={styles.modalBg}
-                onClick={() => setEditModeModalOpen(false)}
-              >
+              <div style={styles.modalBg} onClick={() => setEditModeModalOpen(false)}>
                 <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-                  <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>
-                    {T.changeMode}
-                  </div>
+                  <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>{T.changeMode}</div>
 
                   <TemplatePicker
                     lang={lang}
-                    onPick={(id) => {
-                      const next = { ...layout, mode: 'template', templateId: id };
+                    onPick={(fullId) => {
+                      const initTemplateData = makeInitialTemplateData(fullId, lang);
+
+                      const next = {
+                        ...layout,
+                        mode: 'template',
+                        templateId: fullId,
+                        templateData: initTemplateData,
+                        items: [],
+                      };
                       setLayout(next);
                       saveJson(KEYS.MENU_LAYOUT, next);
                       setEditModeModalOpen(false);
+                      setEdit(true);
+                      setPreview(false);
+                      setTplPanelOpen(true);
+                      setTimeout(() => hardResetScrollTop('auto'), 0);
                     }}
                   />
 
@@ -817,21 +1238,19 @@ export default function MenuEditor() {
                   <button
                     style={styles.primaryBtn}
                     onClick={() => {
-                      const next = { ...layout, mode: 'custom', templateId: null };
+                      const next = { ...layout, mode: 'custom', templateId: null, templateData: null };
                       setLayout(next);
                       saveJson(KEYS.MENU_LAYOUT, next);
                       setEditModeModalOpen(false);
                       setEdit(true);
                       setPreview(false);
+                      setTimeout(() => hardResetScrollTop('auto'), 0);
                     }}
                   >
                     {T.freeEdit}
                   </button>
 
-                  <button
-                    style={styles.secondaryBtn}
-                    onClick={() => setEditModeModalOpen(false)}
-                  >
+                  <button style={styles.secondaryBtn} onClick={() => setEditModeModalOpen(false)}>
                     {T.close}
                   </button>
                 </div>
@@ -842,12 +1261,8 @@ export default function MenuEditor() {
             {pinModalOpen && (
               <div style={styles.modalBg} onClick={() => setPinModalOpen(false)}>
                 <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-                  <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>
-                    {T.pinEnterTitle}
-                  </div>
-                  <div style={{ fontSize: 13, opacity: 0.75, marginBottom: 10 }}>
-                    {T.pinEnterDesc}
-                  </div>
+                  <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>{T.pinEnterTitle}</div>
+                  <div style={{ fontSize: 13, opacity: 0.75, marginBottom: 10 }}>{T.pinEnterDesc}</div>
 
                   <input
                     type="password"
@@ -867,8 +1282,12 @@ export default function MenuEditor() {
                   {pinError && <div style={styles.errText}>{pinError}</div>}
 
                   <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-                    <button style={styles.primaryBtn} onClick={submitPin}>{T.confirm}</button>
-                    <button style={styles.secondaryBtn} onClick={() => setPinModalOpen(false)}>{T.cancel}</button>
+                    <button style={styles.primaryBtn} onClick={submitPin}>
+                      {T.confirm}
+                    </button>
+                    <button style={styles.secondaryBtn} onClick={() => setPinModalOpen(false)}>
+                      {T.cancel}
+                    </button>
                   </div>
                 </div>
               </div>
@@ -878,9 +1297,7 @@ export default function MenuEditor() {
             {settingsOpen && (
               <div style={styles.modalBg} onClick={() => setSettingsOpen(false)}>
                 <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-                  <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>
-                    {T.pinSettings}
-                  </div>
+                  <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>{T.pinSettings}</div>
 
                   <div style={{ fontWeight: 900, marginBottom: 6 }}>{T.pinChange}</div>
 
@@ -916,7 +1333,9 @@ export default function MenuEditor() {
                   {settingsMsg && <div style={styles.okText}>{settingsMsg}</div>}
 
                   <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-                    <button style={styles.primaryBtn} onClick={submitChangePin}>{T.change}</button>
+                    <button style={styles.primaryBtn} onClick={submitChangePin}>
+                      {T.change}
+                    </button>
                     <button
                       style={styles.secondaryBtn}
                       onClick={() => {
@@ -932,11 +1351,136 @@ export default function MenuEditor() {
               </div>
             )}
 
+            {/* ✅✅ 페이지 배경 모달 */}
+            {pageBgModalOpen && (
+              <div style={styles.modalBg} onClick={() => setPageBgModalOpen(false)}>
+                <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+                  <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>{T.pageBgTitle}</div>
+
+                  <div style={{ fontWeight: 900, marginBottom: 8 }}>
+                    {T.currentPage}: {pageIndex} / {totalPages}
+                  </div>
+
+                  <div style={{ fontSize: 13, opacity: 0.75, marginBottom: 10 }}>
+                    {hasOverrideThisPage ? T.usingOverride : T.usingDefault}
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                    <button style={styles.primaryBtn} onClick={openPageBgPicker}>
+                      {T.uploadThis}
+                    </button>
+
+                    <button
+                      style={styles.secondaryBtn}
+                      onClick={() => clearPageBgOverride(pageIndex)}
+                      disabled={!hasOverrideThisPage}
+                    >
+                      {T.clearThis}
+                    </button>
+
+                    <button style={styles.secondaryBtn} onClick={() => setPageBgModalOpen(false)}>
+                      {T.close}
+                    </button>
+                  </div>
+
+                  <input
+                    ref={pageBgInputRef}
+                    type="file"
+                    accept="image/*"
+                    style={{ display: 'none' }}
+                    onChange={(e) => uploadPageBg(e.target.files?.[0], pageIndex)}
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
     </div>
   );
+}
+
+// ✅ 초기 템플릿 데이터
+function makeInitialTemplateData(fullId, lang) {
+  const group = (fullId || '').slice(0, 2);
+  const variant = (fullId || '').slice(2, 3) || 'A';
+  const isKo = lang === 'ko';
+
+  const defaultTitle =
+    group === 'T1'
+      ? isKo
+        ? '오늘의 메뉴'
+        : 'Today’s Menu'
+      : group === 'T2'
+      ? isKo
+        ? '추천 메뉴'
+        : 'Featured'
+      : isKo
+      ? '메뉴'
+      : 'Menu';
+
+  const baseStyle = {
+    fontFamily: 'system-ui',
+    textColor: '#ffffff',
+    accentColor: 'rgba(255,255,255,0.65)',
+    lineSpacing: 1.12,
+    rowGap: 14,
+    forceTwoDecimals: true,
+    uiScale: 0.85,
+    variant,
+  };
+
+  const common = {
+    restaurantName: isKo ? '한소반' : 'Hansoban',
+    logoSrc: null,
+  };
+
+  if (group === 'T1') {
+    return {
+      ...common,
+      title: defaultTitle,
+      currency: '$',
+      style: baseStyle,
+      rows: [
+        { name: isKo ? '김치찌개' : 'Kimchi Stew', price: '9.99' },
+        { name: isKo ? '불고기' : 'Bulgogi', price: '12.99' },
+        { name: isKo ? '비빔밥' : 'Bibimbap', price: '10.99' },
+      ],
+    };
+  }
+
+  if (group === 'T2') {
+    return {
+      ...common,
+      title: defaultTitle,
+      currency: '$',
+      style: baseStyle,
+      photos: [],
+      rows: [
+        { name: isKo ? '한우 국밥' : 'Beef Soup', price: '13.99' },
+        { name: isKo ? '제육볶음' : 'Spicy Pork', price: '11.99' },
+        { name: isKo ? '된장찌개' : 'Soybean Stew', price: '9.99' },
+        { name: isKo ? '비빔밥' : 'Bibimbap', price: '10.99' },
+        { name: isKo ? '불고기' : 'Bulgogi', price: '12.99' },
+        { name: isKo ? '김치전' : 'Kimchi Pancake', price: '8.99' },
+      ],
+      caption: isKo ? '사진을 업로드하세요' : 'Upload photo',
+    };
+  }
+
+  return {
+    ...common,
+    title: defaultTitle,
+    currency: '$',
+    style: baseStyle,
+    columns: 2,
+    cells: [
+      { name: isKo ? '라면' : 'Ramen', price: '7.99' },
+      { name: isKo ? '만두' : 'Dumplings', price: '6.99' },
+      { name: isKo ? '튀김' : 'Fried', price: '8.99' },
+      { name: isKo ? '우동' : 'Udon', price: '9.99' },
+    ],
+  };
 }
 
 const styles = {
@@ -979,7 +1523,6 @@ const styles = {
   hint: { marginTop: 10, fontSize: 12, opacity: 0.65 },
   smallNote: { marginTop: 12, fontSize: 12, opacity: 0.7 },
 
-  // ✅ stage가 스크롤 컨테이너
   stage: {
     position: 'relative',
     width: '100%',
@@ -993,31 +1536,20 @@ const styles = {
   page: {
     position: 'relative',
     width: '100%',
-  },
-
-  // ✅ 배경: repeat-y 타일
-  bgTile: {
-    position: 'absolute',
-    inset: 0,
-    backgroundRepeat: 'repeat-y',
-    backgroundPosition: 'top center',
-    backgroundSize: '100% auto',
-    filter: 'none',
-    zIndex: 0,
+    overflow: 'hidden',
   },
 
   secretHotspot: {
-    position: 'absolute',
+    position: 'fixed',
     top: 0,
     right: 0,
-    width: 90,
-    height: 90,
-    zIndex: 1000,
+    width: 140,
+    height: 140,
+    zIndex: 999999,
     background: 'transparent',
     touchAction: 'none',
   },
 
-  // ✅ 언어 버튼(국기) — 우측 상단
   langWrap: {
     position: 'fixed',
     top: 16,
@@ -1043,7 +1575,6 @@ const styles = {
     background: 'rgba(0,0,0,0.65)',
   },
 
-  // ✅ 국기 아래 세로 메뉴
   editMenu: {
     position: 'fixed',
     top: 56,
@@ -1057,15 +1588,14 @@ const styles = {
     overflowX: 'auto',
   },
 
-  // ✅ 미리보기 모드: 저장/뒤로가기만
   previewBar: {
     position: 'fixed',
     right: 16,
-    bottom: 16,          // ✅ 저장/취소 자리로
+    bottom: 16,
     zIndex: 9999,
     pointerEvents: 'auto',
     display: 'flex',
-    flexDirection: 'row', // ✅ 한 줄
+    flexDirection: 'row',
     gap: 10,
     alignItems: 'center',
     flexWrap: 'nowrap',
@@ -1092,7 +1622,6 @@ const styles = {
     whiteSpace: 'nowrap',
   },
 
-  // ✅ 보기모드에서만 보이는 수정 버튼
   editBtn: {
     position: 'fixed',
     top: 58,
@@ -1102,10 +1631,9 @@ const styles = {
     border: 'none',
     cursor: 'pointer',
     fontWeight: 900,
-    zIndex: 2200,
+    zIndex: 999999,
   },
 
-  // ✅ 페이지 컨트롤
   pageCtrl: {
     position: 'fixed',
     left: 16,
@@ -1138,7 +1666,6 @@ const styles = {
     userSelect: 'none',
   },
 
-  // ✅ 뒤로가기(영상으로)
   backBtn: {
     position: 'fixed',
     left: 16,
@@ -1163,6 +1690,20 @@ const styles = {
     borderRadius: 10,
   },
 
+  tplShowBtn: {
+    position: 'fixed',
+    left: 16,
+    top: 108,
+    zIndex: 99999,
+    padding: '10px 12px',
+    borderRadius: 12,
+    border: '1px solid rgba(255,255,255,0.35)',
+    background: 'rgba(0,0,0,0.55)',
+    color: '#fff',
+    fontWeight: 900,
+    cursor: 'pointer',
+  },
+
   helpHint: {
     position: 'fixed',
     left: 16,
@@ -1173,6 +1714,7 @@ const styles = {
     padding: 12,
     borderRadius: 12,
     maxWidth: 520,
+    whiteSpace: 'pre-line',
   },
 
   modalBg: {
