@@ -1139,12 +1139,6 @@ export default function MenuEditor() {
                 </div>
               )}
 
-              {!isOverlayOpen && !edit && !preview && (
-                <button style={styles.backBtn} onClick={goIntro}>
-                  {T.backToVideo}
-                </button>
-              )}
-
               {/* ✅ secret hotspot */}
               {!showEditBtn && !edit && !preview && (
                 <div
@@ -1563,6 +1557,12 @@ export default function MenuEditor() {
               )}
             </div>
           </div>
+          
+          {!isOverlayOpen && !edit && !preview && (
+            <button style={styles.backBtn} onClick={goIntro}>
+              {T.backToVideo}
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -1893,13 +1893,18 @@ const styles = {
     position: 'fixed',
     left: 16,
     bottom: 16,
-    padding: '10px 14px',
-    borderRadius: 999,
+    width: 100,
+    height: 32,
+    padding: 0,
+    borderRadius: 20,
     border: 'none',
     cursor: 'pointer',
     fontWeight: 900,
     zIndex: 2200,
     background: 'rgba(255,255,255,0.9)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   badge: {
