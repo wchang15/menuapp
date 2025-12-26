@@ -34,10 +34,15 @@ const DEFAULT_PAGE_PADDING_TOP = 70;
 // ✅ T2 사진 슬롯과 동일
 const MAX_PHOTOS = 8;
 
-// ✅✅ 페이지별 배경 오버라이드 저장 키(추가)
+// ✅✅ 페이지별 배경 오버라이드 저장 키
 const BG_OVERRIDES_KEY = 'MENU_BG_OVERRIDES_V1';
 // 각 페이지 blob 키: `${KEYS.MENU_BG}__P${page}`
 const bgPageKey = (page) => `${KEYS.MENU_BG}__P${page}`;
+
+// ✅ 보기모드 페이지 전환 튜닝
+const TURN_ANIM_MS = 320;
+const WHEEL_THRESHOLD = 40;
+const TOUCH_THRESHOLD = 55;
 
 function clampNum(v, min, max) {
   const n = Number(v);
@@ -270,6 +275,16 @@ export default function MenuEditor() {
   // ✅ 페이지 배경 설정 모달
   const [pageBgModalOpen, setPageBgModalOpen] = useState(false);
 
+  // ✅ viewport height (보기모드 scale용)
+  const [vh, setVh] = useState(900);
+
+  useEffect(() => {
+    const update = () => setVh(window.innerHeight || 900);
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+
   // ✅ (핵심) 스크롤을 확실히 0으로 리셋하는 함수
   const hardResetScrollTop = (behavior = 'auto') => {
     const sc = stageScrollRef.current;
@@ -399,10 +414,9 @@ export default function MenuEditor() {
     if (!file || !Number.isFinite(p) || p < 1) return;
 
     await saveBlob(bgPageKey(p), file);
-
     setBgOverrides((prev) => ({ ...(prev || {}), [p]: file }));
 
-    // overrides 인덱스 저장(삭제 함수 없으니 "사용 여부"만 관리)
+    // overrides 인덱스 저장
     try {
       const nextIndex = { ...(await loadJson(BG_OVERRIDES_KEY)) };
       nextIndex[p] = true;
@@ -431,7 +445,6 @@ export default function MenuEditor() {
       delete nextIdx[p];
       await saveJson(BG_OVERRIDES_KEY, nextIdx);
     } catch {}
-    // blob 자체는 저장소에 남을 수 있음(삭제 API 없어서). 기능상 문제 없음.
   };
 
   const onDrop = async (e) => {
@@ -735,25 +748,54 @@ export default function MenuEditor() {
 
   const fullScrollHeight = useMemo(() => contentHeight, [contentHeight]);
 
-  // ✅ totalPages가 줄었을 때, 화면이 2페이지 위치에 남아있으면 무조건 맨 위로
+  // ✅ 보기모드에서만: 한 화면=한 페이지 + 스와이프/휠 전환
+  const pageTurnEnabled = useMemo(() => {
+    return !!bgUrl && !edit && !preview && !isOverlayOpen;
+  }, [bgUrl, edit, preview, isOverlayOpen]);
+
+  // ✅ 보기모드 스케일(화면 높이에 맞추기) / 편집&미리보기는 1:1(크게)
+  const viewScale = useMemo(() => {
+    const s = (vh || 900) / PAGE_HEIGHT;
+    return Math.max(0.25, Math.min(1, s));
+  }, [vh]);
+
+  const effectiveScale = useMemo(() => {
+    return pageTurnEnabled ? viewScale : 1;
+  }, [pageTurnEnabled, viewScale]);
+
+  const viewTranslateY = useMemo(() => {
+    return -((pageIndex - 1) * (PAGE_HEIGHT + PAGE_GAP) * effectiveScale);
+  }, [pageIndex, effectiveScale]);
+
+  // ✅ pageTurnEnabled 켜질 때: 스크롤 잔상 제거
   useEffect(() => {
-    const sc = stageScrollRef.current;
-    if (!sc) return;
+    if (!pageTurnEnabled) return;
+    hardResetScrollTop('auto');
+  }, [pageTurnEnabled]);
 
-    const maxTop = Math.max(0, (totalPages - 1) * (PAGE_HEIGHT + PAGE_GAP));
-    if (sc.scrollTop > maxTop + 8) {
-      hardResetScrollTop('auto');
-      setPageIndex(1);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [totalPages]);
-
+  // ✅ totalPages가 줄었을 때 pageIndex 보정
   useEffect(() => {
     if (pageIndex > totalPages) setPageIndex(totalPages);
     if (pageIndex < 1) setPageIndex(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [totalPages]);
 
+  // ✅ edit 상태 변화 시 초기화
+  useEffect(() => {
+    if (edit) {
+      setPageView(true);
+      setPageIndex(1);
+      setPreview(false);
+      setTplPanelOpen(true);
+      setTimeout(() => hardResetScrollTop('auto'), 0);
+    } else {
+      setPreview(false);
+      setTimeout(() => hardResetScrollTop('auto'), 0);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [edit]);
+
+  // ✅ edit에서 pageView 켰을 때 페이지 스크롤 이동(편집 전용)
   const scrollToPage = (pi) => {
     const sc = stageScrollRef.current;
     if (!sc) return;
@@ -770,19 +812,6 @@ export default function MenuEditor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pageIndex, edit, pageView, preview]);
 
-  useEffect(() => {
-    if (edit) {
-      setPageView(true);
-      setPageIndex(1);
-      setPreview(false);
-      setTplPanelOpen(true);
-      setTimeout(() => hardResetScrollTop('auto'), 0);
-    } else {
-      setPreview(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [edit]);
-
   const handleSaveAll = async () => {
     const next = { ...layout };
     setLayout(next);
@@ -791,6 +820,7 @@ export default function MenuEditor() {
     setPreview(false);
     setEdit(false);
     hideEditButton();
+    setPageIndex(1);
     setTimeout(() => hardResetScrollTop('auto'), 0);
   };
 
@@ -800,7 +830,8 @@ export default function MenuEditor() {
   const renderBgPages = () => {
     if (!bgUrl) return null;
 
-    return Array.from({ length: totalPages }).map((_, i) => {
+    const pagesForBg = pageTurnEnabled ? totalPages : totalPages; // 동일, 구조만 명시
+    return Array.from({ length: pagesForBg }).map((_, i) => {
       const pageNum = i + 1;
       const overrideUrl = bgOverrideUrls?.[String(pageNum)] || bgOverrideUrls?.[pageNum];
       const useUrl = overrideUrl || bgUrl;
@@ -829,6 +860,70 @@ export default function MenuEditor() {
   };
 
   const hasOverrideThisPage = !!bgOverrides?.[pageIndex];
+
+  // ✅ 보기모드 스와이프/휠 처리
+  const wheelAccRef = useRef(0);
+  const wheelLockRef = useRef(false);
+  const touchRef = useRef({ y: 0, active: false });
+
+  const goPrevPage = () => setPageIndex((p) => Math.max(1, p - 1));
+  const goNextPage = () => setPageIndex((p) => Math.min(totalPages, p + 1));
+
+  const onWheel = (e) => {
+    if (!pageTurnEnabled) return;
+
+    // 스크롤 막고, 페이지 전환만
+    e.preventDefault();
+    if (wheelLockRef.current) return;
+
+    wheelAccRef.current += e.deltaY;
+
+    if (Math.abs(wheelAccRef.current) >= WHEEL_THRESHOLD) {
+      const dy = wheelAccRef.current;
+      wheelAccRef.current = 0;
+
+      if (dy > 0) goNextPage();
+      else goPrevPage();
+
+      wheelLockRef.current = true;
+      setTimeout(() => {
+        wheelLockRef.current = false;
+      }, TURN_ANIM_MS + 30);
+    }
+  };
+
+  const onTouchStart = (e) => {
+    if (!pageTurnEnabled) return;
+    const y = e.touches?.[0]?.clientY;
+    if (typeof y !== 'number') return;
+    touchRef.current = { y, active: true };
+  };
+
+  const onTouchMove = (e) => {
+    if (!pageTurnEnabled) return;
+    // 스크롤 막기
+    e.preventDefault();
+  };
+
+  const onTouchEnd = (e) => {
+    if (!pageTurnEnabled) return;
+    if (!touchRef.current.active) return;
+
+    const y2 = e.changedTouches?.[0]?.clientY;
+    if (typeof y2 !== 'number') {
+      touchRef.current = { y: 0, active: false };
+      return;
+    }
+
+    const dy = y2 - touchRef.current.y;
+    touchRef.current = { y: 0, active: false };
+
+    if (Math.abs(dy) < TOUCH_THRESHOLD) return;
+
+    // 위로 스와이프(dy<0) => 다음, 아래로(dy>0) => 이전
+    if (dy < 0) goNextPage();
+    else goPrevPage();
+  };
 
   return (
     <div style={styles.container}>
@@ -877,522 +972,569 @@ export default function MenuEditor() {
           </div>
         </div>
       ) : (
-        <div ref={stageScrollRef} style={styles.stage}>
-          <div style={{ ...styles.page, height: fullScrollHeight }}>
-            {renderBgPages()}
+        <div
+          ref={stageScrollRef}
+          style={{
+            ...styles.stage,
+            overflowY: pageTurnEnabled ? 'hidden' : 'auto',
+            WebkitOverflowScrolling: pageTurnEnabled ? 'auto' : 'touch',
+            touchAction: pageTurnEnabled ? 'none' : 'pan-y',
+          }}
+          onWheel={onWheel}
+          onTouchStart={onTouchStart}
+          onTouchMove={onTouchMove}
+          onTouchEnd={onTouchEnd}
+        >
+          {/* ✅ mover: 보기모드에서만 translate, 편집/미리보기는 none */}
+          <div
+            style={{
+              ...styles.viewportMover,
+              transform: pageTurnEnabled ? `translate3d(0, ${viewTranslateY}px, 0)` : 'none',
+              transition: pageTurnEnabled ? `transform ${TURN_ANIM_MS}ms ease` : 'none',
+              willChange: pageTurnEnabled ? 'transform' : 'auto',
+            }}
+          >
+            {/* ✅ content wrapper: 보기모드에서만 scale, 편집/미리보기는 1:1 크게 */}
+            <div
+              style={{
+                ...styles.page,
+                height: fullScrollHeight,
+                transform: pageTurnEnabled ? `scale(${effectiveScale})` : 'none',
+                transformOrigin: 'top center',
+              }}
+            >
+              {renderBgPages()}
 
-            {edit && !preview && (
-              <>
-                {Array.from({ length: totalPages - 1 }).map((_, i) => {
-                  const y = (i + 1) * PAGE_HEIGHT + i * PAGE_GAP;
-                  return (
-                    <div
-                      key={i}
-                      style={{
-                        position: 'absolute',
-                        left: 0,
-                        right: 0,
-                        top: y,
-                        height: PAGE_GAP,
-                        background: 'rgba(0,0,0,0.65)',
-                        borderTop: '1px dashed rgba(255,255,255,0.55)',
-                        borderBottom: '1px dashed rgba(255,255,255,0.55)',
-                        zIndex: 30,
-                        pointerEvents: 'none',
-                      }}
-                    />
-                  );
-                })}
-              </>
-            )}
+              {/* ✅ 편집 중 페이지 구분선 */}
+              {edit && !preview && (
+                <>
+                  {Array.from({ length: totalPages - 1 }).map((_, i) => {
+                    const y = (i + 1) * PAGE_HEIGHT + i * PAGE_GAP;
+                    return (
+                      <div
+                        key={i}
+                        style={{
+                          position: 'absolute',
+                          left: 0,
+                          right: 0,
+                          top: y,
+                          height: PAGE_GAP,
+                          background: 'rgba(0,0,0,0.65)',
+                          borderTop: '1px dashed rgba(255,255,255,0.55)',
+                          borderBottom: '1px dashed rgba(255,255,255,0.55)',
+                          zIndex: 30,
+                          pointerEvents: 'none',
+                        }}
+                      />
+                    );
+                  })}
+                </>
+              )}
 
-            {!isOverlayOpen && !preview && (
-              <div style={styles.langWrap}>
-                <button
-                  style={{ ...styles.langBtn, ...(lang === 'en' ? styles.langBtnActive : {}) }}
-                  onClick={() => setLanguage('en')}
-                  aria-label="English"
-                  title="English"
-                >
-                  🇺🇸
-                </button>
-                <button
-                  style={{ ...styles.langBtn, ...(lang === 'ko' ? styles.langBtnActive : {}) }}
-                  onClick={() => setLanguage('ko')}
-                  aria-label="Korean"
-                  title="한국어"
-                >
-                  🇰🇷
-                </button>
-              </div>
-            )}
-
-            {edit && !preview && !isOverlayOpen && (
-              <div style={styles.editMenu} onMouseDown={(e) => e.stopPropagation()}>
-                <button
-                  style={styles.menuBtn}
-                  onClick={() => {
-                    setTplPanelOpen(false);
-                    setEditModeModalOpen(true);
-                  }}
-                >
-                  {T.changeMode}
-                </button>
-
-                <button style={styles.menuBtn} onClick={() => setPageBgModalOpen(true)}>
-                  {T.pageBg}
-                </button>
-
-                <button
-                  style={styles.menuBtn}
-                  onClick={() => {
-                    setSettingsError('');
-                    setSettingsMsg('');
-                    setSettingsOpen(true);
-                  }}
-                >
-                  {T.pinSettings}
-                </button>
-
-                <button style={styles.menuBtn} onClick={openFilePicker}>
-                  {T.changeBg}
-                </button>
-
-                <button style={styles.menuBtnDark} onClick={() => setPreview(true)}>
-                  {T.preview}
-                </button>
-
-                {/* 전체 배경 */}
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  style={{ display: 'none' }}
-                  onChange={(e) => uploadBg(e.target.files?.[0])}
-                />
-              </div>
-            )}
-
-            {edit && preview && !isOverlayOpen && (
-              <div style={styles.previewBar} onMouseDown={(e) => e.stopPropagation()}>
-                <button style={styles.menuBtnDark} onClick={handleSaveAll}>
-                  {T.save}
-                </button>
-                <button style={styles.menuBtn} onClick={handleExitPreview}>
-                  {T.back}
-                </button>
-              </div>
-            )}
-
-            {!isOverlayOpen && !edit && !preview && (
-              <button style={styles.backBtn} onClick={goIntro}>
-                {T.backToVideo}
-              </button>
-            )}
-
-            {/* ✅ secret hotspot */}
-            {!showEditBtn && !edit && !preview && (
-              <div
-                style={styles.secretHotspot}
-                onClick={onSecretCornerClick}
-                onMouseDown={startLongPress}
-                onMouseUp={cancelLongPress}
-                onMouseLeave={cancelLongPress}
-                onTouchStart={startLongPress}
-                onTouchEnd={cancelLongPress}
-                onTouchCancel={cancelLongPress}
-                aria-label="secret-edit-hotspot"
-              />
-            )}
-
-            {edit && !preview && (
-              <div style={styles.pageCtrl} onMouseDown={(e) => e.stopPropagation()}>
-                <button style={styles.pageCtrlBtn} onClick={() => setPageView((v) => !v)}>
-                  {pageView ? T.continuous : T.pageView}
-                </button>
-
-                <div style={{ width: 10 }} />
-
-                <button
-                  style={styles.pageCtrlBtn}
-                  onClick={() => {
-                    const next = Math.max(1, pageIndex - 1);
-                    setPageIndex(next);
-                    if (!pageView) scrollToPage(next);
-                  }}
-                  disabled={pageIndex <= 1}
-                >
-                  {T.prev}
-                </button>
-
-                <div style={styles.pageCtrlText}>
-                  {T.page} {pageIndex} / {totalPages}
-                </div>
-
-                <button
-                  style={styles.pageCtrlBtn}
-                  onClick={() => {
-                    const next = Math.min(totalPages, pageIndex + 1);
-                    setPageIndex(next);
-                    if (!pageView) scrollToPage(next);
-                  }}
-                  disabled={pageIndex >= totalPages}
-                >
-                  {T.next}
-                </button>
-
-                <button style={styles.pageCtrlBtn} onClick={() => scrollToPage(pageIndex)}>
-                  {T.jump}
-                </button>
-              </div>
-            )}
-
-            {!edit && !preview && showEditBtn && !isOverlayOpen && (
-              <button
-                style={styles.editBtn}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  requestEdit();
-                }}
-              >
-                {T.edit}
-              </button>
-            )}
-
-            {!layout.mode && !preview && <div style={styles.helpHint}>{T.help}</div>}
-
-            {layout.mode === 'template' && !preview && (
-              <div style={styles.badge}>
-                {T.templateBadge}
-                {layout.templateId}
-              </div>
-            )}
-
-            {layout.mode === 'template' && edit && !preview && !isOverlayOpen && !tplPanelOpen && (
-              <button style={styles.tplShowBtn} onClick={() => setTplPanelOpen(true)}>
-                {T.showTplPanel}
-              </button>
-            )}
-
-            {layout.mode === 'template' && (
-              <TemplateCanvas
-                lang={lang}
-                editing={edit}
-                uiMode={preview ? 'preview' : 'edit'}
-                panelOpen={tplPanelOpen}
-                onTogglePanel={(open) => setTplPanelOpen(open)}
-                pageHeight={PAGE_HEIGHT}
-                pageGap={PAGE_GAP}
-                fullScrollHeight={fullScrollHeight}
-                templateId={layout.templateId}
-                data={layout.templateData}
-                onChange={(nextData) => {
-                  const next = { ...layout, mode: 'template', templateData: nextData };
-                  setLayout(next);
-                  saveJson(KEYS.MENU_LAYOUT, next);
-
-                  setTimeout(() => {
-                    const sc = stageScrollRef.current;
-                    if (!sc) return;
-                    const maxTop = Math.max(0, (totalPages - 1) * (PAGE_HEIGHT + PAGE_GAP));
-                    if (sc.scrollTop > maxTop + 8) hardResetScrollTop('auto');
-                  }, 0);
-                }}
-                onCancel={() => {
-                  setPreview(false);
-                  setEdit(false);
-                  hideEditButton();
-                  setTimeout(() => hardResetScrollTop('auto'), 0);
-                }}
-              />
-            )}
-
-            {layout.mode === 'custom' && (
-              <CustomCanvas
-                lang={lang}
-                inspectorTop={118}
-                items={layout.items}
-                editing={edit}
-                uiMode={preview ? 'preview' : 'edit'}
-                scrollRef={stageScrollRef}
-                onChangeItems={(items) => {
-                  const next = { ...layout, mode: 'custom', items };
-                  setLayout(next);
-                }}
-                onSave={(items) => {
-                  const next = { ...layout, mode: 'custom', items };
-                  setLayout(next);
-                  saveJson(KEYS.MENU_LAYOUT, next);
-
-                  setPreview(false);
-                  setEdit(false);
-                  hideEditButton();
-                  setTimeout(() => hardResetScrollTop('auto'), 0);
-                }}
-                onCancel={() => {
-                  setPreview(false);
-                  setEdit(false);
-                  hideEditButton();
-                  setTimeout(() => hardResetScrollTop('auto'), 0);
-                }}
-              />
-            )}
-
-            {/* ✅ 최초 편집 모드 선택 모달 */}
-            {edit && !preview && layout.mode !== 'custom' && layout.mode !== 'template' && (
-              <div
-                style={styles.modalBg}
-                onClick={() => {
-                  setEdit(false);
-                  setPreview(false);
-                  hideEditButton();
-                  setTimeout(() => hardResetScrollTop('auto'), 0);
-                }}
-              >
-                <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-                  <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 10 }}>{T.editModePick}</div>
-
-                  <TemplatePicker
-                    lang={lang}
-                    onPick={(fullId) => {
-                      const initTemplateData = makeInitialTemplateData(fullId, lang);
-
-                      const next = {
-                        ...layout,
-                        mode: 'template',
-                        templateId: fullId,
-                        templateData: initTemplateData,
-                        items: [],
-                      };
-                      setLayout(next);
-                      saveJson(KEYS.MENU_LAYOUT, next);
-
-                      setEdit(true);
-                      setPreview(false);
-                      setTplPanelOpen(true);
-                      setTimeout(() => hardResetScrollTop('auto'), 0);
-                    }}
-                  />
-
-                  <div style={{ height: 12 }} />
-
+              {/* ✅ 언어 */}
+              {!isOverlayOpen && !preview && (
+                <div style={styles.langWrap}>
                   <button
-                    style={styles.primaryBtn}
+                    style={{ ...styles.langBtn, ...(lang === 'en' ? styles.langBtnActive : {}) }}
+                    onClick={() => setLanguage('en')}
+                    aria-label="English"
+                    title="English"
+                  >
+                    🇺🇸
+                  </button>
+                  <button
+                    style={{ ...styles.langBtn, ...(lang === 'ko' ? styles.langBtnActive : {}) }}
+                    onClick={() => setLanguage('ko')}
+                    aria-label="Korean"
+                    title="한국어"
+                  >
+                    🇰🇷
+                  </button>
+                </div>
+              )}
+
+              {/* ✅ 편집 메뉴 */}
+              {edit && !preview && !isOverlayOpen && (
+                <div style={styles.editMenu} onMouseDown={(e) => e.stopPropagation()}>
+                  <button
+                    style={styles.menuBtn}
                     onClick={() => {
-                      const next = { ...layout, mode: 'custom', templateId: null, templateData: null };
-                      setLayout(next);
-                      saveJson(KEYS.MENU_LAYOUT, next);
-                      setEdit(true);
-                      setPreview(false);
-                      setTimeout(() => hardResetScrollTop('auto'), 0);
+                      setTplPanelOpen(false);
+                      setEditModeModalOpen(true);
                     }}
                   >
-                    {T.freeEdit}
+                    {T.changeMode}
+                  </button>
+
+                  <button style={styles.menuBtn} onClick={() => setPageBgModalOpen(true)}>
+                    {T.pageBg}
                   </button>
 
                   <button
-                    style={styles.secondaryBtn}
+                    style={styles.menuBtn}
                     onClick={() => {
-                      setEdit(false);
-                      setPreview(false);
-                      hideEditButton();
-                      setTimeout(() => hardResetScrollTop('auto'), 0);
+                      setSettingsError('');
+                      setSettingsMsg('');
+                      setSettingsOpen(true);
                     }}
                   >
-                    {T.close}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* ✅ 편집 중에도 전환 가능한 "편집 방식 변경" 모달 */}
-            {edit && !preview && editModeModalOpen && (
-              <div style={styles.modalBg} onClick={() => setEditModeModalOpen(false)}>
-                <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-                  <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>{T.changeMode}</div>
-
-                  <TemplatePicker
-                    lang={lang}
-                    onPick={(fullId) => {
-                      const initTemplateData = makeInitialTemplateData(fullId, lang);
-
-                      const next = {
-                        ...layout,
-                        mode: 'template',
-                        templateId: fullId,
-                        templateData: initTemplateData,
-                        items: [],
-                      };
-                      setLayout(next);
-                      saveJson(KEYS.MENU_LAYOUT, next);
-                      setEditModeModalOpen(false);
-                      setEdit(true);
-                      setPreview(false);
-                      setTplPanelOpen(true);
-                      setTimeout(() => hardResetScrollTop('auto'), 0);
-                    }}
-                  />
-
-                  <div style={{ height: 12 }} />
-
-                  <button
-                    style={styles.primaryBtn}
-                    onClick={() => {
-                      const next = { ...layout, mode: 'custom', templateId: null, templateData: null };
-                      setLayout(next);
-                      saveJson(KEYS.MENU_LAYOUT, next);
-                      setEditModeModalOpen(false);
-                      setEdit(true);
-                      setPreview(false);
-                      setTimeout(() => hardResetScrollTop('auto'), 0);
-                    }}
-                  >
-                    {T.freeEdit}
+                    {T.pinSettings}
                   </button>
 
-                  <button style={styles.secondaryBtn} onClick={() => setEditModeModalOpen(false)}>
-                    {T.close}
+                  <button style={styles.menuBtn} onClick={openFilePicker}>
+                    {T.changeBg}
                   </button>
-                </div>
-              </div>
-            )}
 
-            {/* ✅ PIN 모달 */}
-            {pinModalOpen && (
-              <div style={styles.modalBg} onClick={() => setPinModalOpen(false)}>
-                <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-                  <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>{T.pinEnterTitle}</div>
-                  <div style={{ fontSize: 13, opacity: 0.75, marginBottom: 10 }}>{T.pinEnterDesc}</div>
+                  <button style={styles.menuBtnDark} onClick={() => setPreview(true)}>
+                    {T.preview}
+                  </button>
 
+                  {/* 전체 배경 */}
                   <input
-                    type="password"
-                    value={pinInput}
-                    onChange={(e) => setPinInput(e.target.value)}
-                    inputMode="numeric"
-                    placeholder={lang === 'ko' ? '4자리 숫자' : '4 digits'}
-                    style={styles.pinInput}
-                    maxLength={4}
-                    autoFocus
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') submitPin();
-                      if (e.key === 'Escape') setPinModalOpen(false);
-                    }}
-                  />
-
-                  {pinError && <div style={styles.errText}>{pinError}</div>}
-
-                  <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-                    <button style={styles.primaryBtn} onClick={submitPin}>
-                      {T.confirm}
-                    </button>
-                    <button style={styles.secondaryBtn} onClick={() => setPinModalOpen(false)}>
-                      {T.cancel}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* ✅ 비밀번호 설정 모달 */}
-            {settingsOpen && (
-              <div style={styles.modalBg} onClick={() => setSettingsOpen(false)}>
-                <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-                  <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>{T.pinSettings}</div>
-
-                  <div style={{ fontWeight: 900, marginBottom: 6 }}>{T.pinChange}</div>
-
-                  <input
-                    type="password"
-                    value={curPinInput}
-                    onChange={(e) => setCurPinInput(e.target.value)}
-                    inputMode="numeric"
-                    placeholder={T.curPin}
-                    style={styles.pinInput}
-                    maxLength={4}
-                  />
-                  <input
-                    type="password"
-                    value={newPinInput}
-                    onChange={(e) => setNewPinInput(e.target.value)}
-                    inputMode="numeric"
-                    placeholder={T.newPin}
-                    style={styles.pinInput}
-                    maxLength={4}
-                  />
-                  <input
-                    type="password"
-                    value={newPinConfirm}
-                    onChange={(e) => setNewPinConfirm(e.target.value)}
-                    inputMode="numeric"
-                    placeholder={T.newPin2}
-                    style={styles.pinInput}
-                    maxLength={4}
-                  />
-
-                  {settingsError && <div style={styles.errText}>{settingsError}</div>}
-                  {settingsMsg && <div style={styles.okText}>{settingsMsg}</div>}
-
-                  <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-                    <button style={styles.primaryBtn} onClick={submitChangePin}>
-                      {T.change}
-                    </button>
-                    <button
-                      style={styles.secondaryBtn}
-                      onClick={() => {
-                        setSettingsOpen(false);
-                        setSettingsError('');
-                        setSettingsMsg('');
-                      }}
-                    >
-                      {T.close}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* ✅✅ 페이지 배경 모달 */}
-            {pageBgModalOpen && (
-              <div style={styles.modalBg} onClick={() => setPageBgModalOpen(false)}>
-                <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-                  <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>{T.pageBgTitle}</div>
-
-                  <div style={{ fontWeight: 900, marginBottom: 8 }}>
-                    {T.currentPage}: {pageIndex} / {totalPages}
-                  </div>
-
-                  <div style={{ fontSize: 13, opacity: 0.75, marginBottom: 10 }}>
-                    {hasOverrideThisPage ? T.usingOverride : T.usingDefault}
-                  </div>
-
-                  <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                    <button style={styles.primaryBtn} onClick={openPageBgPicker}>
-                      {T.uploadThis}
-                    </button>
-
-                    <button
-                      style={styles.secondaryBtn}
-                      onClick={() => clearPageBgOverride(pageIndex)}
-                      disabled={!hasOverrideThisPage}
-                    >
-                      {T.clearThis}
-                    </button>
-
-                    <button style={styles.secondaryBtn} onClick={() => setPageBgModalOpen(false)}>
-                      {T.close}
-                    </button>
-                  </div>
-
-                  <input
-                    ref={pageBgInputRef}
+                    ref={fileInputRef}
                     type="file"
                     accept="image/*"
                     style={{ display: 'none' }}
-                    onChange={(e) => uploadPageBg(e.target.files?.[0], pageIndex)}
+                    onChange={(e) => uploadBg(e.target.files?.[0])}
                   />
                 </div>
-              </div>
-            )}
+              )}
+
+              {/* ✅ 미리보기 상단 바 */}
+              {edit && preview && !isOverlayOpen && (
+                <div style={styles.previewBar} onMouseDown={(e) => e.stopPropagation()}>
+                  <button style={styles.menuBtnDark} onClick={handleSaveAll}>
+                    {T.save}
+                  </button>
+                  <button style={styles.menuBtn} onClick={handleExitPreview}>
+                    {T.back}
+                  </button>
+                </div>
+              )}
+
+              {!isOverlayOpen && !edit && !preview && (
+                <button style={styles.backBtn} onClick={goIntro}>
+                  {T.backToVideo}
+                </button>
+              )}
+
+              {/* ✅ secret hotspot */}
+              {!showEditBtn && !edit && !preview && (
+                <div
+                  style={styles.secretHotspot}
+                  onClick={onSecretCornerClick}
+                  onMouseDown={startLongPress}
+                  onMouseUp={cancelLongPress}
+                  onMouseLeave={cancelLongPress}
+                  onTouchStart={startLongPress}
+                  onTouchEnd={cancelLongPress}
+                  onTouchCancel={cancelLongPress}
+                  aria-label="secret-edit-hotspot"
+                />
+              )}
+
+              {/* ✅ 편집 페이지 컨트롤(편집에서만) */}
+              {edit && !preview && (
+                <div style={styles.pageCtrl} onMouseDown={(e) => e.stopPropagation()}>
+                  <button style={styles.pageCtrlBtn} onClick={() => setPageView((v) => !v)}>
+                    {pageView ? T.continuous : T.pageView}
+                  </button>
+
+                  <div style={{ width: 10 }} />
+
+                  <button
+                    style={styles.pageCtrlBtn}
+                    onClick={() => {
+                      const next = Math.max(1, pageIndex - 1);
+                      setPageIndex(next);
+                      if (!pageView) scrollToPage(next);
+                    }}
+                    disabled={pageIndex <= 1}
+                  >
+                    {T.prev}
+                  </button>
+
+                  <div style={styles.pageCtrlText}>
+                    {T.page} {pageIndex} / {totalPages}
+                  </div>
+
+                  <button
+                    style={styles.pageCtrlBtn}
+                    onClick={() => {
+                      const next = Math.min(totalPages, pageIndex + 1);
+                      setPageIndex(next);
+                      if (!pageView) scrollToPage(next);
+                    }}
+                    disabled={pageIndex >= totalPages}
+                  >
+                    {T.next}
+                  </button>
+
+                  <button style={styles.pageCtrlBtn} onClick={() => scrollToPage(pageIndex)}>
+                    {T.jump}
+                  </button>
+                </div>
+              )}
+
+              {/* ✅ 보기모드 페이지 인디케이터(옵션: 조용하게) */}
+              {!edit && !preview && !isOverlayOpen && totalPages > 1 && (
+                <div style={styles.viewPageHint}>
+                  {pageIndex} / {totalPages}
+                </div>
+              )}
+
+              {/* ✅ Edit 버튼 */}
+              {!edit && !preview && showEditBtn && !isOverlayOpen && (
+                <button
+                  style={styles.editBtn}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    requestEdit();
+                  }}
+                >
+                  {T.edit}
+                </button>
+              )}
+
+              {!layout.mode && !preview && <div style={styles.helpHint}>{T.help}</div>}
+
+              {layout.mode === 'template' && !preview && (
+                <div style={styles.badge}>
+                  {T.templateBadge}
+                  {layout.templateId}
+                </div>
+              )}
+
+              {layout.mode === 'template' && edit && !preview && !isOverlayOpen && !tplPanelOpen && (
+                <button style={styles.tplShowBtn} onClick={() => setTplPanelOpen(true)}>
+                  {T.showTplPanel}
+                </button>
+              )}
+
+              {/* ✅ Template */}
+              {layout.mode === 'template' && (
+                <TemplateCanvas
+                  lang={lang}
+                  editing={edit}
+                  uiMode={preview ? 'preview' : 'edit'}
+                  panelOpen={tplPanelOpen}
+                  onTogglePanel={(open) => setTplPanelOpen(open)}
+                  pageHeight={PAGE_HEIGHT}
+                  pageGap={PAGE_GAP}
+                  fullScrollHeight={fullScrollHeight}
+                  templateId={layout.templateId}
+                  data={layout.templateData}
+                  onChange={(nextData) => {
+                    const next = { ...layout, mode: 'template', templateData: nextData };
+                    setLayout(next);
+                    saveJson(KEYS.MENU_LAYOUT, next);
+                  }}
+                  onCancel={() => {
+                    setPreview(false);
+                    setEdit(false);
+                    hideEditButton();
+                    setPageIndex(1);
+                    setTimeout(() => hardResetScrollTop('auto'), 0);
+                  }}
+                />
+              )}
+
+              {/* ✅ Custom */}
+              {layout.mode === 'custom' && (
+                <CustomCanvas
+                  lang={lang}
+                  inspectorTop={118}
+                  items={layout.items}
+                  editing={edit}
+                  uiMode={preview ? 'preview' : 'edit'}
+                  scrollRef={stageScrollRef}
+                  onChangeItems={(items) => {
+                    const next = { ...layout, mode: 'custom', items };
+                    setLayout(next);
+                  }}
+                  onSave={(items) => {
+                    const next = { ...layout, mode: 'custom', items };
+                    setLayout(next);
+                    saveJson(KEYS.MENU_LAYOUT, next);
+
+                    setPreview(false);
+                    setEdit(false);
+                    hideEditButton();
+                    setPageIndex(1);
+                    setTimeout(() => hardResetScrollTop('auto'), 0);
+                  }}
+                  onCancel={() => {
+                    setPreview(false);
+                    setEdit(false);
+                    hideEditButton();
+                    setPageIndex(1);
+                    setTimeout(() => hardResetScrollTop('auto'), 0);
+                  }}
+                />
+              )}
+
+              {/* ✅ 최초 편집 모드 선택 모달 */}
+              {edit && !preview && layout.mode !== 'custom' && layout.mode !== 'template' && (
+                <div
+                  style={styles.modalBg}
+                  onClick={() => {
+                    setEdit(false);
+                    setPreview(false);
+                    hideEditButton();
+                    setPageIndex(1);
+                    setTimeout(() => hardResetScrollTop('auto'), 0);
+                  }}
+                >
+                  <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+                    <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 10 }}>{T.editModePick}</div>
+
+                    <TemplatePicker
+                      lang={lang}
+                      onPick={(fullId) => {
+                        const initTemplateData = makeInitialTemplateData(fullId, lang);
+
+                        const next = {
+                          ...layout,
+                          mode: 'template',
+                          templateId: fullId,
+                          templateData: initTemplateData,
+                          items: [],
+                        };
+                        setLayout(next);
+                        saveJson(KEYS.MENU_LAYOUT, next);
+
+                        setEdit(true);
+                        setPreview(false);
+                        setTplPanelOpen(true);
+                        setPageIndex(1);
+                        setTimeout(() => hardResetScrollTop('auto'), 0);
+                      }}
+                    />
+
+                    <div style={{ height: 12 }} />
+
+                    <button
+                      style={styles.primaryBtn}
+                      onClick={() => {
+                        const next = { ...layout, mode: 'custom', templateId: null, templateData: null };
+                        setLayout(next);
+                        saveJson(KEYS.MENU_LAYOUT, next);
+                        setEdit(true);
+                        setPreview(false);
+                        setPageIndex(1);
+                        setTimeout(() => hardResetScrollTop('auto'), 0);
+                      }}
+                    >
+                      {T.freeEdit}
+                    </button>
+
+                    <button
+                      style={styles.secondaryBtn}
+                      onClick={() => {
+                        setEdit(false);
+                        setPreview(false);
+                        hideEditButton();
+                        setPageIndex(1);
+                        setTimeout(() => hardResetScrollTop('auto'), 0);
+                      }}
+                    >
+                      {T.close}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* ✅ 편집 중에도 전환 가능한 "편집 방식 변경" 모달 */}
+              {edit && !preview && editModeModalOpen && (
+                <div style={styles.modalBg} onClick={() => setEditModeModalOpen(false)}>
+                  <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+                    <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>{T.changeMode}</div>
+
+                    <TemplatePicker
+                      lang={lang}
+                      onPick={(fullId) => {
+                        const initTemplateData = makeInitialTemplateData(fullId, lang);
+
+                        const next = {
+                          ...layout,
+                          mode: 'template',
+                          templateId: fullId,
+                          templateData: initTemplateData,
+                          items: [],
+                        };
+                        setLayout(next);
+                        saveJson(KEYS.MENU_LAYOUT, next);
+                        setEditModeModalOpen(false);
+                        setEdit(true);
+                        setPreview(false);
+                        setTplPanelOpen(true);
+                        setPageIndex(1);
+                        setTimeout(() => hardResetScrollTop('auto'), 0);
+                      }}
+                    />
+
+                    <div style={{ height: 12 }} />
+
+                    <button
+                      style={styles.primaryBtn}
+                      onClick={() => {
+                        const next = { ...layout, mode: 'custom', templateId: null, templateData: null };
+                        setLayout(next);
+                        saveJson(KEYS.MENU_LAYOUT, next);
+                        setEditModeModalOpen(false);
+                        setEdit(true);
+                        setPreview(false);
+                        setPageIndex(1);
+                        setTimeout(() => hardResetScrollTop('auto'), 0);
+                      }}
+                    >
+                      {T.freeEdit}
+                    </button>
+
+                    <button style={styles.secondaryBtn} onClick={() => setEditModeModalOpen(false)}>
+                      {T.close}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* ✅ PIN 모달 */}
+              {pinModalOpen && (
+                <div style={styles.modalBg} onClick={() => setPinModalOpen(false)}>
+                  <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+                    <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>{T.pinEnterTitle}</div>
+                    <div style={{ fontSize: 13, opacity: 0.75, marginBottom: 10 }}>{T.pinEnterDesc}</div>
+
+                    <input
+                      type="password"
+                      value={pinInput}
+                      onChange={(e) => setPinInput(e.target.value)}
+                      inputMode="numeric"
+                      placeholder={lang === 'ko' ? '4자리 숫자' : '4 digits'}
+                      style={styles.pinInput}
+                      maxLength={4}
+                      autoFocus
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') submitPin();
+                        if (e.key === 'Escape') setPinModalOpen(false);
+                      }}
+                    />
+
+                    {pinError && <div style={styles.errText}>{pinError}</div>}
+
+                    <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+                      <button style={styles.primaryBtn} onClick={submitPin}>
+                        {T.confirm}
+                      </button>
+                      <button style={styles.secondaryBtn} onClick={() => setPinModalOpen(false)}>
+                        {T.cancel}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ✅ 비밀번호 설정 모달 */}
+              {settingsOpen && (
+                <div style={styles.modalBg} onClick={() => setSettingsOpen(false)}>
+                  <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+                    <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>{T.pinSettings}</div>
+
+                    <div style={{ fontWeight: 900, marginBottom: 6 }}>{T.pinChange}</div>
+
+                    <input
+                      type="password"
+                      value={curPinInput}
+                      onChange={(e) => setCurPinInput(e.target.value)}
+                      inputMode="numeric"
+                      placeholder={T.curPin}
+                      style={styles.pinInput}
+                      maxLength={4}
+                    />
+                    <input
+                      type="password"
+                      value={newPinInput}
+                      onChange={(e) => setNewPinInput(e.target.value)}
+                      inputMode="numeric"
+                      placeholder={T.newPin}
+                      style={styles.pinInput}
+                      maxLength={4}
+                    />
+                    <input
+                      type="password"
+                      value={newPinConfirm}
+                      onChange={(e) => setNewPinConfirm(e.target.value)}
+                      inputMode="numeric"
+                      placeholder={T.newPin2}
+                      style={styles.pinInput}
+                      maxLength={4}
+                    />
+
+                    {settingsError && <div style={styles.errText}>{settingsError}</div>}
+                    {settingsMsg && <div style={styles.okText}>{settingsMsg}</div>}
+
+                    <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+                      <button style={styles.primaryBtn} onClick={submitChangePin}>
+                        {T.change}
+                      </button>
+                      <button
+                        style={styles.secondaryBtn}
+                        onClick={() => {
+                          setSettingsOpen(false);
+                          setSettingsError('');
+                          setSettingsMsg('');
+                        }}
+                      >
+                        {T.close}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ✅✅ 페이지 배경 모달 */}
+              {pageBgModalOpen && (
+                <div style={styles.modalBg} onClick={() => setPageBgModalOpen(false)}>
+                  <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+                    <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>{T.pageBgTitle}</div>
+
+                    <div style={{ fontWeight: 900, marginBottom: 8 }}>
+                      {T.currentPage}: {pageIndex} / {totalPages}
+                    </div>
+
+                    <div style={{ fontSize: 13, opacity: 0.75, marginBottom: 10 }}>
+                      {hasOverrideThisPage ? T.usingOverride : T.usingDefault}
+                    </div>
+
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                      <button style={styles.primaryBtn} onClick={openPageBgPicker}>
+                        {T.uploadThis}
+                      </button>
+
+                      <button
+                        style={styles.secondaryBtn}
+                        onClick={() => clearPageBgOverride(pageIndex)}
+                        disabled={!hasOverrideThisPage}
+                      >
+                        {T.clearThis}
+                      </button>
+
+                      <button style={styles.secondaryBtn} onClick={() => setPageBgModalOpen(false)}>
+                        {T.close}
+                      </button>
+                    </div>
+
+                    <input
+                      ref={pageBgInputRef}
+                      type="file"
+                      accept="image/*"
+                      style={{ display: 'none' }}
+                      onChange={(e) => uploadPageBg(e.target.files?.[0], pageIndex)}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -1527,10 +1669,13 @@ const styles = {
     position: 'relative',
     width: '100%',
     height: '100%',
-    overflowY: 'auto',
     overflowX: 'hidden',
-    WebkitOverflowScrolling: 'touch',
     background: '#000',
+  },
+
+  viewportMover: {
+    position: 'relative',
+    width: '100%',
   },
 
   page: {
@@ -1663,6 +1808,20 @@ const styles = {
     fontSize: 13,
     opacity: 0.95,
     padding: '0 6px',
+    userSelect: 'none',
+  },
+
+  viewPageHint: {
+    position: 'fixed',
+    left: 16,
+    top: 64,
+    zIndex: 99999,
+    padding: '8px 10px',
+    borderRadius: 10,
+    background: 'rgba(0,0,0,0.45)',
+    color: '#fff',
+    fontWeight: 900,
+    fontSize: 13,
     userSelect: 'none',
   },
 
