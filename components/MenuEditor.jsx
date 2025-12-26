@@ -935,6 +935,10 @@ export default function MenuEditor() {
     else goPrevPage();
   };
 
+  const langWrapStyle = edit ? styles.langWrapEdit : styles.langWrapView;
+  const langBtnStyle = edit ? styles.langBtn : styles.langBtnView;
+  const langBtnActiveStyle = edit ? styles.langBtnActive : styles.langBtnActiveView;
+
   return (
     <div style={styles.container}>
       {!bgUrl ? (
@@ -1044,9 +1048,9 @@ export default function MenuEditor() {
 
               {/* ✅ 언어 */}
               {!isOverlayOpen && !preview && (
-                <div style={styles.langWrap}>
+                <div style={langWrapStyle}>
                   <button
-                    style={{ ...styles.langBtn, ...(lang === 'en' ? styles.langBtnActive : {}) }}
+                    style={{ ...langBtnStyle, ...(lang === 'en' ? langBtnActiveStyle : {}) }}
                     onClick={() => setLanguage('en')}
                     aria-label="English"
                     title="English"
@@ -1054,7 +1058,7 @@ export default function MenuEditor() {
                     🇺🇸
                   </button>
                   <button
-                    style={{ ...styles.langBtn, ...(lang === 'ko' ? styles.langBtnActive : {}) }}
+                    style={{ ...langBtnStyle, ...(lang === 'ko' ? langBtnActiveStyle : {}) }}
                     onClick={() => setLanguage('ko')}
                     aria-label="Korean"
                     title="한국어"
@@ -1718,14 +1722,23 @@ const styles = {
     touchAction: 'none',
   },
 
-  langWrap: {
+  langWrapEdit: {
     position: 'fixed',
     top: 'calc(env(safe-area-inset-top, 0px) + 10px)',
-    left: '50%',
-    transform: 'translateX(-50%)',
+    right: 16,
     zIndex: 99999,
     display: 'flex',
     gap: 8,
+    alignItems: 'center',
+  },
+
+  langWrapView: {
+    position: 'fixed',
+    top: 'calc(env(safe-area-inset-top, 0px) + 110px)',
+    right: 'calc(env(safe-area-inset-right, 0px) + 20px)',
+    zIndex: 99999,
+    display: 'flex',
+    gap: 16,
     alignItems: 'center',
   },
 
@@ -1740,6 +1753,26 @@ const styles = {
     lineHeight: '32px',
   },
   langBtnActive: {
+    border: '1px solid rgba(255,255,255,0.95)',
+    background: 'rgba(0,0,0,0.65)',
+  },
+
+  langBtnView: {
+    width: 80,
+    height: 64,
+    borderRadius: 20,
+    border: '1px solid rgba(255,255,255,0.6)',
+    background: 'rgba(0,0,0,0.48)',
+    cursor: 'pointer',
+    fontSize: 36,
+    lineHeight: 1.1,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    boxShadow: '0 8px 28px rgba(0,0,0,0.35)',
+    padding: 0,
+  },
+  langBtnActiveView: {
     border: '1px solid rgba(255,255,255,0.95)',
     background: 'rgba(0,0,0,0.65)',
   },
