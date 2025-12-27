@@ -1724,7 +1724,7 @@ const styles = {
 
   langWrapEdit: {
     position: 'fixed',
-    top: 'calc(env(safe-area-inset-top, 0px) + 10px)',
+    top: 'calc(env(safe-area-inset-top, 0px) + 28px)',
     right: 16,
     zIndex: 99999,
     display: 'flex',
@@ -1750,7 +1750,9 @@ const styles = {
     background: 'rgba(0,0,0,0.45)',
     cursor: 'pointer',
     fontSize: 18,
-    lineHeight: '32px',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   langBtnActive: {
     border: '1px solid rgba(255,255,255,0.95)',
