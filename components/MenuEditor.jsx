@@ -1023,6 +1023,198 @@ export default function MenuEditor() {
     return null;
   };
 
+  const renderModals = () => (
+    <>
+      {pinModalOpen && (
+        <div style={styles.modalBg} onClick={() => setPinModalOpen(false)}>
+          <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>{T.pinEnterTitle}</div>
+            <div style={{ fontSize: 13, opacity: 0.75, marginBottom: 10 }}>{T.pinEnterDesc}</div>
+
+            <input
+              type="password"
+              value={pinInput}
+              onChange={(e) => setPinInput(e.target.value)}
+              inputMode="numeric"
+              placeholder={lang === 'ko' ? '4자리 숫자' : '4 digits'}
+              style={styles.pinInput}
+              maxLength={4}
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') submitPin();
+                if (e.key === 'Escape') setPinModalOpen(false);
+              }}
+            />
+
+            {pinError && <div style={styles.errText}>{pinError}</div>}
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+              <button style={styles.primaryBtn} onClick={submitPin}>
+                {T.confirm}
+              </button>
+              <button style={styles.secondaryBtn} onClick={() => setPinModalOpen(false)}>
+                {T.cancel}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {settingsOpen && (
+        <div style={styles.modalBg} onClick={() => setSettingsOpen(false)}>
+          <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>{T.pinSettings}</div>
+
+            <div style={{ fontWeight: 900, marginBottom: 6 }}>{T.pinChange}</div>
+
+            <input
+              type="password"
+              value={curPinInput}
+              onChange={(e) => setCurPinInput(e.target.value)}
+              inputMode="numeric"
+              placeholder={T.curPin}
+              style={styles.pinInput}
+              maxLength={4}
+            />
+            <input
+              type="password"
+              value={newPinInput}
+              onChange={(e) => setNewPinInput(e.target.value)}
+              inputMode="numeric"
+              placeholder={T.newPin}
+              style={styles.pinInput}
+              maxLength={4}
+            />
+            <input
+              type="password"
+              value={newPinConfirm}
+              onChange={(e) => setNewPinConfirm(e.target.value)}
+              inputMode="numeric"
+              placeholder={T.newPin2}
+              style={styles.pinInput}
+              maxLength={4}
+            />
+
+            {settingsError && <div style={styles.errText}>{settingsError}</div>}
+            {settingsMsg && <div style={styles.okText}>{settingsMsg}</div>}
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+              <button style={styles.primaryBtn} onClick={submitChangePin}>
+                {T.change}
+              </button>
+              <button
+                style={styles.secondaryBtn}
+                onClick={() => {
+                  setSettingsOpen(false);
+                  setSettingsError('');
+                  setSettingsMsg('');
+                }}
+              >
+                {T.close}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pageBgModalOpen && (
+        <div style={styles.modalBg} onClick={() => setPageBgModalOpen(false)}>
+          <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>{T.pageBgTitle}</div>
+
+            <div style={{ fontWeight: 900, marginBottom: 8 }}>
+              {T.currentPage}: {pageIndex} / {totalPages}
+            </div>
+
+            <div style={{ fontSize: 13, opacity: 0.75, marginBottom: 10 }}>
+              {hasOverrideThisPage ? T.usingOverride : T.usingDefault}
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <button style={styles.primaryBtn} onClick={openPageBgPicker}>
+                {T.uploadThis}
+              </button>
+
+              <button
+                style={styles.secondaryBtn}
+                onClick={() => clearPageBgOverride(pageIndex)}
+                disabled={!hasOverrideThisPage}
+              >
+                {T.clearThis}
+              </button>
+
+              <button style={styles.secondaryBtn} onClick={() => setPageBgModalOpen(false)}>
+                {T.close}
+              </button>
+            </div>
+
+            <input
+              ref={pageBgInputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={(e) => uploadPageBg(e.target.files?.[0], pageIndex)}
+            />
+          </div>
+        </div>
+      )}
+
+      {editModeModalOpen && (
+        <div style={styles.modalBg} onClick={() => setEditModeModalOpen(false)}>
+          <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>{T.changeMode}</div>
+
+            <div style={{ display: 'grid', gap: 12 }}>
+              <div style={{ fontWeight: 900, marginBottom: 4 }}>{T.pickTemplate}</div>
+              <TemplatePicker
+                lang={lang}
+                onPick={(fullId) => {
+                  setEditModeModalOpen(false);
+
+                  const data = makeInitialTemplateData(fullId, lang);
+                  const next = { mode: 'template', templateId: fullId, templateData: data, items: [] };
+
+                  setLayout(next);
+                  saveJson(KEYS.MENU_LAYOUT, next);
+                  setEdit(true);
+                  setPreview(false);
+                  setPageIndex(1);
+                  setTimeout(() => hardResetScrollTop('auto'), 0);
+                }}
+              />
+
+              <div style={{ height: 12 }} />
+
+              <button
+                style={styles.primaryBtn}
+                onClick={() => {
+                  const next = { ...layout, mode: 'custom', templateId: null, templateData: null };
+                  setLayout(next);
+                  saveJson(KEYS.MENU_LAYOUT, next);
+                  setEditModeModalOpen(false);
+                  setEdit(true);
+                  setPreview(false);
+                  setPageIndex(1);
+                  setTimeout(() => hardResetScrollTop('auto'), 0);
+                }}
+              >
+                {T.freeEdit}
+              </button>
+
+              <button style={styles.secondaryBtn} onClick={() => setEditModeModalOpen(false)}>
+                {T.close}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+
+  const langWrapStyle = edit ? styles.langWrapEdit : styles.langWrapView;
+  const langBtnStyle = edit ? styles.langBtn : styles.langBtnView;
+  const langBtnActiveStyle = edit ? styles.langBtnActive : styles.langBtnActiveView;
+
   const renderViewPages = () => {
     const pageWidthScaled = PAGE_WIDTH * effectiveScale;
     const pageHeightScaled = PAGE_HEIGHT * effectiveScale;
@@ -1100,13 +1292,69 @@ export default function MenuEditor() {
             })}
           </div>
         </div>
+
+        {/* ✅ View overlays */}
+        {!isOverlayOpen && !preview && (
+          <div style={langWrapStyle}>
+            <button
+              style={{ ...langBtnStyle, ...(lang === 'en' ? langBtnActiveStyle : {}) }}
+              onClick={() => setLanguage('en')}
+              aria-label="English"
+              title="English"
+            >
+              🇺🇸
+            </button>
+            <button
+              style={{ ...langBtnStyle, ...(lang === 'ko' ? langBtnActiveStyle : {}) }}
+              onClick={() => setLanguage('ko')}
+              aria-label="Korean"
+              title="한국어"
+            >
+              🇰🇷
+            </button>
+          </div>
+        )}
+
+        {!edit && !preview && !isOverlayOpen && totalPages > 1 && (
+          <div style={styles.viewPageHint}>
+            {pageIndex} / {totalPages}
+          </div>
+        )}
+
+        {!showEditBtn && !edit && !preview && (
+          <div
+            style={styles.secretHotspot}
+            onClick={onSecretCornerClick}
+            onMouseDown={startLongPress}
+            onMouseUp={cancelLongPress}
+            onMouseLeave={cancelLongPress}
+            onTouchStart={startLongPress}
+            onTouchEnd={cancelLongPress}
+            onTouchCancel={cancelLongPress}
+            aria-label="secret-edit-hotspot"
+          />
+        )}
+
+        {!edit && !preview && showEditBtn && !isOverlayOpen && (
+          <button
+            style={styles.editBtn}
+            onClick={(e) => {
+              e.stopPropagation();
+              requestEdit();
+            }}
+          >
+            {T.edit}
+          </button>
+        )}
+
+        {!isOverlayOpen && !edit && !preview && (
+          <button style={styles.backBtn} onClick={goIntro}>
+            {T.backToVideo}
+          </button>
+        )}
       </div>
     );
   };
-
-  const langWrapStyle = edit ? styles.langWrapEdit : styles.langWrapView;
-  const langBtnStyle = edit ? styles.langBtn : styles.langBtnView;
-  const langBtnActiveStyle = edit ? styles.langBtnActive : styles.langBtnActiveView;
 
   return (
     <div style={styles.container}>
@@ -1581,142 +1829,6 @@ export default function MenuEditor() {
                 </div>
               )}
 
-              {/* ✅ PIN 모달 */}
-              {pinModalOpen && (
-                <div style={styles.modalBg} onClick={() => setPinModalOpen(false)}>
-                  <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-                    <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>{T.pinEnterTitle}</div>
-                    <div style={{ fontSize: 13, opacity: 0.75, marginBottom: 10 }}>{T.pinEnterDesc}</div>
-
-                    <input
-                      type="password"
-                      value={pinInput}
-                      onChange={(e) => setPinInput(e.target.value)}
-                      inputMode="numeric"
-                      placeholder={lang === 'ko' ? '4자리 숫자' : '4 digits'}
-                      style={styles.pinInput}
-                      maxLength={4}
-                      autoFocus
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') submitPin();
-                        if (e.key === 'Escape') setPinModalOpen(false);
-                      }}
-                    />
-
-                    {pinError && <div style={styles.errText}>{pinError}</div>}
-
-                    <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-                      <button style={styles.primaryBtn} onClick={submitPin}>
-                        {T.confirm}
-                      </button>
-                      <button style={styles.secondaryBtn} onClick={() => setPinModalOpen(false)}>
-                        {T.cancel}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* ✅ 비밀번호 설정 모달 */}
-              {settingsOpen && (
-                <div style={styles.modalBg} onClick={() => setSettingsOpen(false)}>
-                  <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-                    <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>{T.pinSettings}</div>
-
-                    <div style={{ fontWeight: 900, marginBottom: 6 }}>{T.pinChange}</div>
-
-                    <input
-                      type="password"
-                      value={curPinInput}
-                      onChange={(e) => setCurPinInput(e.target.value)}
-                      inputMode="numeric"
-                      placeholder={T.curPin}
-                      style={styles.pinInput}
-                      maxLength={4}
-                    />
-                    <input
-                      type="password"
-                      value={newPinInput}
-                      onChange={(e) => setNewPinInput(e.target.value)}
-                      inputMode="numeric"
-                      placeholder={T.newPin}
-                      style={styles.pinInput}
-                      maxLength={4}
-                    />
-                    <input
-                      type="password"
-                      value={newPinConfirm}
-                      onChange={(e) => setNewPinConfirm(e.target.value)}
-                      inputMode="numeric"
-                      placeholder={T.newPin2}
-                      style={styles.pinInput}
-                      maxLength={4}
-                    />
-
-                    {settingsError && <div style={styles.errText}>{settingsError}</div>}
-                    {settingsMsg && <div style={styles.okText}>{settingsMsg}</div>}
-
-                    <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-                      <button style={styles.primaryBtn} onClick={submitChangePin}>
-                        {T.change}
-                      </button>
-                      <button
-                        style={styles.secondaryBtn}
-                        onClick={() => {
-                          setSettingsOpen(false);
-                          setSettingsError('');
-                          setSettingsMsg('');
-                        }}
-                      >
-                        {T.close}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* ✅✅ 페이지 배경 모달 */}
-              {pageBgModalOpen && (
-                <div style={styles.modalBg} onClick={() => setPageBgModalOpen(false)}>
-                  <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-                    <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>{T.pageBgTitle}</div>
-
-                    <div style={{ fontWeight: 900, marginBottom: 8 }}>
-                      {T.currentPage}: {pageIndex} / {totalPages}
-                    </div>
-
-                    <div style={{ fontSize: 13, opacity: 0.75, marginBottom: 10 }}>
-                      {hasOverrideThisPage ? T.usingOverride : T.usingDefault}
-                    </div>
-
-                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                      <button style={styles.primaryBtn} onClick={openPageBgPicker}>
-                        {T.uploadThis}
-                      </button>
-
-                      <button
-                        style={styles.secondaryBtn}
-                        onClick={() => clearPageBgOverride(pageIndex)}
-                        disabled={!hasOverrideThisPage}
-                      >
-                        {T.clearThis}
-                      </button>
-
-                      <button style={styles.secondaryBtn} onClick={() => setPageBgModalOpen(false)}>
-                        {T.close}
-                      </button>
-                    </div>
-
-                    <input
-                      ref={pageBgInputRef}
-                      type="file"
-                      accept="image/*"
-                      style={{ display: 'none' }}
-                      onChange={(e) => uploadPageBg(e.target.files?.[0], pageIndex)}
-                    />
-                  </div>
-                </div>
-              )}
             </div>
           </div>
           
@@ -1727,6 +1839,8 @@ export default function MenuEditor() {
           )}
         </div>
       )}
+
+      {renderModals()}
     </div>
   );
 }
