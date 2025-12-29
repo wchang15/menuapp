@@ -853,8 +853,13 @@ export default function MenuEditor() {
   // ✅ 보기모드 스케일 / 편집&미리보기는 1:1(크게)
   const viewScale = useMemo(() => {
     const widthScale = (vw || PAGE_WIDTH) / PAGE_WIDTH;
-    return Math.max(0.25, Math.min(1.1, widthScale));
-  }, [vw]);
+    const heightScale = (vh || PAGE_HEIGHT) / PAGE_HEIGHT;
+
+    // 양쪽에 검은 여백 없이 가득 차도록 가로를 우선하되,
+    // 세로 영역을 넘기지 않도록 더 작은 비율을 사용.
+    const fitScale = Math.min(widthScale, heightScale);
+    return Math.max(0.25, Math.min(1.1, fitScale));
+  }, [vw, vh]);
 
   const effectiveScale = useMemo(() => {
     return pageTurnEnabled ? viewScale : 1;
