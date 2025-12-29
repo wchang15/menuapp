@@ -21,6 +21,7 @@ const SHAPES = [
 const PRESET_KEY = 'MENU_CUSTOM_PRESETS_V1';
 const SNAP_THRESHOLD = 8;
 const INSPECTOR_AUTOHIDE_MS = 5000;
+const INSPECTOR_ENABLED = false;
 
 // ✅ 드래그 중 자동 스크롤
 const AUTO_SCROLL_ZONE = 80;
@@ -67,12 +68,12 @@ export default function CustomCanvas({
   const [presetSelectedId, setPresetSelectedId] = useState('');
 
   // ✅ Inspector 표시/자동숨김
-  const [inspectorVisible, setInspectorVisible] = useState(true);
+  const [inspectorVisible, setInspectorVisible] = useState(false);
   const hideTimerRef = useRef(null);
   const hideReasonRef = useRef(null); // 'select' | 'add'
 
   // ✅ 툴바 숨김/표시
-  const [toolbarVisible, setToolbarVisible] = useState(true);
+  const [toolbarVisible, setToolbarVisible] = useState(false);
 
   // ✅ 멀티 드래그 이동용
   const dragAnchorRef = useRef(null);
@@ -101,9 +102,10 @@ export default function CustomCanvas({
       setInspectorVisible(false);
       clearInspectorHideTimer();
       hideReasonRef.current = null;
-      setToolbarVisible(true);
+      setToolbarVisible(false);
     } else {
-      setInspectorVisible(true);
+      setInspectorVisible(false);
+      setToolbarVisible(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing]);
@@ -118,8 +120,8 @@ export default function CustomCanvas({
       setToolbarVisible(false);
     } else {
       if (editing) {
-        setInspectorVisible(true);
-        setToolbarVisible(true);
+        setInspectorVisible(false);
+        setToolbarVisible(false);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -193,6 +195,7 @@ export default function CustomCanvas({
   };
 
   const showInspectorBySelect = () => {
+    if (!INSPECTOR_ENABLED) return;
     if (isPreview) return;
     setInspectorVisible(true);
     hideReasonRef.current = 'select';
@@ -206,6 +209,7 @@ export default function CustomCanvas({
   };
 
   const showInspectorByAdd = () => {
+    if (!INSPECTOR_ENABLED) return;
     if (isPreview) return;
     setInspectorVisible(true);
     hideReasonRef.current = 'add';
@@ -331,7 +335,7 @@ export default function CustomCanvas({
     setSelectedIds([]);
     clearInspectorHideTimer();
     hideReasonRef.current = null;
-    setInspectorVisible(true);
+    setInspectorVisible(false);
     onCancel?.(origin);
   };
 
@@ -563,6 +567,9 @@ export default function CustomCanvas({
 
   const loadPreset = (presetId) => {
     if (isPreview) return;
+    if (!INSPECTOR_ENABLED) {
+      return;
+    }
     const all = loadPresets();
     const p = all.find((x) => x.id === presetId);
     if (!p) return;
@@ -872,7 +879,7 @@ export default function CustomCanvas({
       </div>
 
       {/* ✅ Inspector: 편집 + 미리보기X + inspectorVisible */}
-      {isEdit && !isPreview && inspectorVisible && (
+      {INSPECTOR_ENABLED && isEdit && !isPreview && inspectorVisible && (
         <div
           style={{ ...styles.inspector, top: inspectorTop }}
           onMouseDown={(e) => e.stopPropagation()}

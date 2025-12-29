@@ -2084,7 +2084,7 @@ const styles = {
     right: 0,
     width: 140,
     height: 140,
-    zIndex: 999999,
+    zIndex: 9990,
     background: 'transparent',
     touchAction: 'none',
   },
