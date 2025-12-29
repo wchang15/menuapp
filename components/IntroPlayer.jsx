@@ -11,12 +11,18 @@ export default function IntroPlayer() {
   const [videoBlob, setVideoBlob] = useState(null);
   const [videoUrl, setVideoUrl] = useState(null);
   const [muted, setMuted] = useState(true); // 처음엔 음소거
+  const [loading, setLoading] = useState(true);
+
 
   // 저장된 비디오 로드
   useEffect(() => {
     (async () => {
-      const blob = await loadBlob(KEYS.INTRO_VIDEO);
-      if (blob) setVideoBlob(blob);
+      try {
+        const blob = await loadBlob(KEYS.INTRO_VIDEO);
+        if (blob) setVideoBlob(blob);
+      } finally {
+        setLoading(false);
+      }
     })();
   }, []);
 
@@ -90,7 +96,7 @@ export default function IntroPlayer() {
 
   return (
     <div style={styles.container}>
-      {!videoUrl ? (
+      {loading ? null : !videoUrl ? (
         <div style={styles.uploadBox}>
           <input type="file" accept="video/*" onChange={(e) => upload(e.target.files?.[0])} />
         </div>

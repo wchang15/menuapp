@@ -228,6 +228,7 @@ export default function MenuEditor() {
   const pageBgInputRef = useRef(null);
 
   const [dragOver, setDragOver] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   // ✅ 보기모드에서만 잠깐 보이는 “수정 버튼” 상태
   const [showEditBtn, setShowEditBtn] = useState(false);
@@ -296,33 +297,37 @@ export default function MenuEditor() {
 
   useEffect(() => {
     (async () => {
-      const bg = await loadBlob(KEYS.MENU_BG);
-      const lay = (await loadJson(KEYS.MENU_LAYOUT)) || DEFAULT_LAYOUT;
-      if (bg) setBgBlob(bg);
-
-      const safeLay = {
-        ...DEFAULT_LAYOUT,
-        ...(lay || {}),
-        templateData: lay?.templateData ?? null,
-      };
-      setLayout(safeLay);
-
-      // ✅ 페이지별 배경 오버라이드 로드
       try {
-        const overrides = (await loadJson(BG_OVERRIDES_KEY)) || {};
-        const pages = Object.keys(overrides || {});
-        const map = {};
-        for (const p of pages) {
-          const pn = Number(p);
-          if (!Number.isFinite(pn) || pn < 1) continue;
-          const blob = await loadBlob(bgPageKey(pn));
-          if (blob) map[pn] = blob;
-        }
-        setBgOverrides(map);
-      } catch {}
+        const bg = await loadBlob(KEYS.MENU_BG);
+        const lay = (await loadJson(KEYS.MENU_LAYOUT)) || DEFAULT_LAYOUT;
+        if (bg) setBgBlob(bg);
+
+        const safeLay = {
+          ...DEFAULT_LAYOUT,
+          ...(lay || {}),
+          templateData: lay?.templateData ?? null,
+        };
+        setLayout(safeLay);
+
+        // ✅ 페이지별 배경 오버라이드 로드
+        try {
+          const overrides = (await loadJson(BG_OVERRIDES_KEY)) || {};
+          const pages = Object.keys(overrides || {});
+          const map = {};
+          for (const p of pages) {
+            const pn = Number(p);
+            if (!Number.isFinite(pn) || pn < 1) continue;
+            const blob = await loadBlob(bgPageKey(pn));
+            if (blob) map[pn] = blob;
+          }
+          setBgOverrides(map);
+        } catch {}
 
       // ✅ 로드 직후 스크롤 잔상 방지
       setTimeout(() => hardResetScrollTop('auto'), 0);
+      } finally {
+        setLoading(false);
+      }
     })();
 
     // ✅ PIN 로드/초기화
@@ -941,7 +946,7 @@ export default function MenuEditor() {
 
   return (
     <div style={styles.container}>
-      {!bgUrl ? (
+      {loading ? null : !bgUrl ? (
         <div style={styles.setupWrap}>
           <div style={styles.setupCard}>
             <div style={styles.title}>{T.pickBgTitle}</div>
