@@ -1477,7 +1477,7 @@ const styles = {
   toolsOpenBtn: {
     position: 'fixed',
     left: 16,
-    top: 'calc(env(safe-area-inset-top, 0px) + 96px)',
+    top: 'calc(env(safe-area-inset-top, 0px) + 66px)',
     zIndex: 9999,
     padding: '10px 12px',
     borderRadius: 12,
