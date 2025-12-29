@@ -2084,14 +2084,14 @@ const styles = {
     right: 0,
     width: 140,
     height: 140,
-    zIndex: 999999,
+    zIndex: 9990,
     background: 'transparent',
     touchAction: 'none',
   },
 
   langWrapEdit: {
     position: 'fixed',
-    top: 'calc(env(safe-area-inset-top, 0px) + 18px)',
+    top: 'calc(env(safe-area-inset-top, 0px) + 25px)',
     right: 16,
     zIndex: 99999,
     display: 'flex',
