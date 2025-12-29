@@ -2091,7 +2091,7 @@ const styles = {
 
   langWrapEdit: {
     position: 'fixed',
-    top: 'calc(env(safe-area-inset-top, 0px) + 18px)',
+    top: 'calc(env(safe-area-inset-top, 0px) + 22px)',
     right: 16,
     zIndex: 99999,
     display: 'flex',
