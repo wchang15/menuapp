@@ -30,6 +30,7 @@ const MIN_CONTENT_HEIGHT = PAGE_HEIGHT;
 const DEFAULT_ROW_H = 92;
 const DEFAULT_HEADER_H = 210;
 const DEFAULT_PAGE_PADDING_TOP = 70;
+const PAGE_WIDTH = 1080;
 
 // ✅ T2 사진 슬롯과 동일
 const MAX_PHOTOS = 8;
@@ -280,12 +281,42 @@ export default function MenuEditor() {
 
   // ✅ viewport height (보기모드 scale용)
   const [vh, setVh] = useState(900);
+  const [vw, setVw] = useState(1080);
 
   useEffect(() => {
-    const update = () => setVh(window.innerHeight || 900);
+    const update = () => {
+      const vv = typeof window !== 'undefined' ? window.visualViewport : null;
+
+      const heightCandidates = [
+        vv?.height,
+        window.innerHeight,
+        window.screen?.height,
+        window.screen?.availHeight,
+      ]
+        .map((v) => Number(v) || 0)
+        .filter(Boolean);
+
+      const widthCandidates = [
+        vv?.width,
+        window.innerWidth,
+        window.screen?.width,
+        window.screen?.availWidth,
+      ]
+        .map((v) => Number(v) || 0)
+        .filter(Boolean);
+
+      setVh(heightCandidates.length ? Math.max(...heightCandidates) : 900);
+      setVw(widthCandidates.length ? Math.max(...widthCandidates) : 1080);
+    };
+
     update();
     window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', update);
+
+    return () => {
+      window.removeEventListener('resize', update);
+      if (window.visualViewport) window.visualViewport.removeEventListener('resize', update);
+    };
   }, []);
 
   // ✅ (핵심) 스크롤을 확실히 0으로 리셋하는 함수
@@ -349,6 +380,56 @@ export default function MenuEditor() {
       if (saved === 'ko' || saved === 'en') setLang(saved);
     } catch {}
   }, []);
+
+  // ✅ 보기 모드에서 텍스트 길게 눌러도 선택/터치 콜아웃이 뜨지 않도록 body 단위 차단
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+
+    const body = document.body;
+    const html = document.documentElement;
+
+    if (!body || !html) return;
+
+    const prevBody = {
+      userSelect: body.style.userSelect,
+      webkitUserSelect: body.style.webkitUserSelect,
+      webkitTouchCallout: body.style.webkitTouchCallout,
+    };
+    const prevHtml = {
+      userSelect: html.style.userSelect,
+      webkitUserSelect: html.style.webkitUserSelect,
+      webkitTouchCallout: html.style.webkitTouchCallout,
+    };
+
+    if (!edit) {
+      const applyNoSelect = (el) => {
+        el.style.userSelect = 'none';
+        el.style.webkitUserSelect = 'none';
+        el.style.webkitTouchCallout = 'none';
+      };
+
+      applyNoSelect(body);
+      applyNoSelect(html);
+    } else {
+      body.style.userSelect = prevBody.userSelect;
+      body.style.webkitUserSelect = prevBody.webkitUserSelect;
+      body.style.webkitTouchCallout = prevBody.webkitTouchCallout;
+
+      html.style.userSelect = prevHtml.userSelect;
+      html.style.webkitUserSelect = prevHtml.webkitUserSelect;
+      html.style.webkitTouchCallout = prevHtml.webkitTouchCallout;
+    }
+
+    return () => {
+      body.style.userSelect = prevBody.userSelect;
+      body.style.webkitUserSelect = prevBody.webkitUserSelect;
+      body.style.webkitTouchCallout = prevBody.webkitTouchCallout;
+
+      html.style.userSelect = prevHtml.userSelect;
+      html.style.webkitUserSelect = prevHtml.webkitUserSelect;
+      html.style.webkitTouchCallout = prevHtml.webkitTouchCallout;
+    };
+  }, [edit]);
 
   // ✅ (백업) Shift+E 누르면 edit 버튼 강제 노출 (버튼만, 실제 편집은 PIN 필요)
   useEffect(() => {
@@ -770,17 +851,15 @@ export default function MenuEditor() {
 
   // ✅ 보기모드 스케일(화면 높이에 맞추기) / 편집&미리보기는 1:1(크게)
   const viewScale = useMemo(() => {
-    const s = (vh || 900) / PAGE_HEIGHT;
+    const heightScale = (vh || 900) / PAGE_HEIGHT;
+    const widthScale = (vw || PAGE_WIDTH) / PAGE_WIDTH;
+    const s = Math.min(heightScale, widthScale);
     return Math.max(0.25, Math.min(1, s));
-  }, [vh]);
+  }, [vh, vw]);
 
   const effectiveScale = useMemo(() => {
     return pageTurnEnabled ? viewScale : 1;
   }, [pageTurnEnabled, viewScale]);
-
-  const viewTranslateY = useMemo(() => {
-    return -((pageIndex - 1) * (PAGE_HEIGHT + PAGE_GAP) * effectiveScale);
-  }, [pageIndex, effectiveScale]);
 
   // ✅ pageTurnEnabled 켜질 때: 스크롤 잔상 제거
   useEffect(() => {
@@ -841,6 +920,11 @@ export default function MenuEditor() {
 
   const handleExitPreview = () => setPreview(false);
 
+  const getPageBgUrl = (pageNum) => {
+    const overrideUrl = bgOverrideUrls?.[String(pageNum)] || bgOverrideUrls?.[pageNum];
+    return overrideUrl || bgUrl;
+  };
+
   // ✅✅ 배경 렌더: 페이지별 오버라이드가 있으면 그거, 없으면 default(bgUrl)
   const renderBgPages = () => {
     if (!bgUrl) return null;
@@ -848,8 +932,7 @@ export default function MenuEditor() {
     const pagesForBg = pageTurnEnabled ? totalPages : totalPages; // 동일, 구조만 명시
     return Array.from({ length: pagesForBg }).map((_, i) => {
       const pageNum = i + 1;
-      const overrideUrl = bgOverrideUrls?.[String(pageNum)] || bgOverrideUrls?.[pageNum];
-      const useUrl = overrideUrl || bgUrl;
+      const useUrl = getPageBgUrl(pageNum);
 
       const top = i * (PAGE_HEIGHT + PAGE_GAP);
       return (
@@ -879,7 +962,7 @@ export default function MenuEditor() {
   // ✅ 보기모드 스와이프/휠 처리
   const wheelAccRef = useRef(0);
   const wheelLockRef = useRef(false);
-  const touchRef = useRef({ y: 0, active: false });
+  const touchRef = useRef({ x: 0, active: false });
 
   const goPrevPage = () => setPageIndex((p) => Math.max(1, p - 1));
   const goNextPage = () => setPageIndex((p) => Math.min(totalPages, p + 1));
@@ -891,7 +974,9 @@ export default function MenuEditor() {
     e.preventDefault();
     if (wheelLockRef.current) return;
 
-    wheelAccRef.current += e.deltaY;
+    const primaryDelta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+
+    wheelAccRef.current += primaryDelta;
 
     if (Math.abs(wheelAccRef.current) >= WHEEL_THRESHOLD) {
       const dy = wheelAccRef.current;
@@ -909,9 +994,9 @@ export default function MenuEditor() {
 
   const onTouchStart = (e) => {
     if (!pageTurnEnabled) return;
-    const y = e.touches?.[0]?.clientY;
-    if (typeof y !== 'number') return;
-    touchRef.current = { y, active: true };
+    const x = e.touches?.[0]?.clientX;
+    if (typeof x !== 'number') return;
+    touchRef.current = { x, active: true };
   };
 
   const onTouchMove = (e) => {
@@ -924,25 +1009,431 @@ export default function MenuEditor() {
     if (!pageTurnEnabled) return;
     if (!touchRef.current.active) return;
 
-    const y2 = e.changedTouches?.[0]?.clientY;
-    if (typeof y2 !== 'number') {
-      touchRef.current = { y: 0, active: false };
+    const x2 = e.changedTouches?.[0]?.clientX;
+    if (typeof x2 !== 'number') {
+      touchRef.current = { x: 0, active: false };
       return;
     }
 
-    const dy = y2 - touchRef.current.y;
-    touchRef.current = { y: 0, active: false };
+    const dx = x2 - touchRef.current.x;
+    touchRef.current = { x: 0, active: false };
 
-    if (Math.abs(dy) < TOUCH_THRESHOLD) return;
+    if (Math.abs(dx) < TOUCH_THRESHOLD) return;
 
-    // 위로 스와이프(dy<0) => 다음, 아래로(dy>0) => 이전
-    if (dy < 0) goNextPage();
+    // 오른쪽->왼쪽(dx<0) => 다음, 왼쪽->오른쪽(dx>0) => 이전
+    if (dx < 0) goNextPage();
     else goPrevPage();
   };
 
+  const renderCanvasLayer = (width = '100%') => {
+    if (layout.mode === 'template') {
+      return (
+        <div style={{ width }}>
+          <TemplateCanvas
+            lang={lang}
+            editing={edit}
+            uiMode={preview ? 'preview' : 'edit'}
+            panelOpen={tplPanelOpen}
+            onTogglePanel={(open) => setTplPanelOpen(open)}
+            pageHeight={PAGE_HEIGHT}
+            pageGap={PAGE_GAP}
+            fullScrollHeight={fullScrollHeight}
+            templateId={layout.templateId}
+            data={layout.templateData}
+            onChange={(nextData) => {
+              const next = { ...layout, mode: 'template', templateData: nextData };
+              setLayout(next);
+              saveJson(KEYS.MENU_LAYOUT, next);
+            }}
+            onCancel={() => {
+              setPreview(false);
+              setEdit(false);
+              hideEditButton();
+              setPageIndex(1);
+              setTimeout(() => hardResetScrollTop('auto'), 0);
+            }}
+          />
+        </div>
+      );
+    }
+
+    if (layout.mode === 'custom') {
+      return (
+        <div style={{ width }}>
+          <CustomCanvas
+            lang={lang}
+            inspectorTop={118}
+            items={layout.items}
+            editing={edit}
+            uiMode={preview ? 'preview' : 'edit'}
+            scrollRef={stageScrollRef}
+            onChangeItems={(items) => {
+              const next = { ...layout, mode: 'custom', items };
+              setLayout(next);
+            }}
+            onSave={(items) => {
+              const next = { ...layout, mode: 'custom', items };
+              setLayout(next);
+              saveJson(KEYS.MENU_LAYOUT, next);
+
+              setPreview(false);
+              setEdit(false);
+              hideEditButton();
+              setPageIndex(1);
+              setTimeout(() => hardResetScrollTop('auto'), 0);
+            }}
+            onCancel={() => {
+              setPreview(false);
+              setEdit(false);
+              hideEditButton();
+              setPageIndex(1);
+              setTimeout(() => hardResetScrollTop('auto'), 0);
+            }}
+          />
+        </div>
+      );
+    }
+
+    return null;
+  };
+
+  const renderModals = () => (
+    <>
+      {pinModalOpen && (
+        <div style={styles.modalBg} onClick={() => setPinModalOpen(false)}>
+          <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>{T.pinEnterTitle}</div>
+            <div style={{ fontSize: 13, opacity: 0.75, marginBottom: 10 }}>{T.pinEnterDesc}</div>
+
+            <input
+              type="password"
+              value={pinInput}
+              onChange={(e) => setPinInput(e.target.value)}
+              inputMode="numeric"
+              placeholder={lang === 'ko' ? '4자리 숫자' : '4 digits'}
+              style={styles.pinInput}
+              maxLength={4}
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') submitPin();
+                if (e.key === 'Escape') setPinModalOpen(false);
+              }}
+            />
+
+            {pinError && <div style={styles.errText}>{pinError}</div>}
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+              <button style={styles.primaryBtn} onClick={submitPin}>
+                {T.confirm}
+              </button>
+              <button style={styles.secondaryBtn} onClick={() => setPinModalOpen(false)}>
+                {T.cancel}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {settingsOpen && (
+        <div style={styles.modalBg} onClick={() => setSettingsOpen(false)}>
+          <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>{T.pinSettings}</div>
+
+            <div style={{ fontWeight: 900, marginBottom: 6 }}>{T.pinChange}</div>
+
+            <input
+              type="password"
+              value={curPinInput}
+              onChange={(e) => setCurPinInput(e.target.value)}
+              inputMode="numeric"
+              placeholder={T.curPin}
+              style={styles.pinInput}
+              maxLength={4}
+            />
+            <input
+              type="password"
+              value={newPinInput}
+              onChange={(e) => setNewPinInput(e.target.value)}
+              inputMode="numeric"
+              placeholder={T.newPin}
+              style={styles.pinInput}
+              maxLength={4}
+            />
+            <input
+              type="password"
+              value={newPinConfirm}
+              onChange={(e) => setNewPinConfirm(e.target.value)}
+              inputMode="numeric"
+              placeholder={T.newPin2}
+              style={styles.pinInput}
+              maxLength={4}
+            />
+
+            {settingsError && <div style={styles.errText}>{settingsError}</div>}
+            {settingsMsg && <div style={styles.okText}>{settingsMsg}</div>}
+
+            <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
+              <button style={styles.primaryBtn} onClick={submitChangePin}>
+                {T.change}
+              </button>
+              <button
+                style={styles.secondaryBtn}
+                onClick={() => {
+                  setSettingsOpen(false);
+                  setSettingsError('');
+                  setSettingsMsg('');
+                }}
+              >
+                {T.close}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pageBgModalOpen && (
+        <div style={styles.modalBg} onClick={() => setPageBgModalOpen(false)}>
+          <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>{T.pageBgTitle}</div>
+
+            <div style={{ fontWeight: 900, marginBottom: 8 }}>
+              {T.currentPage}: {pageIndex} / {totalPages}
+            </div>
+
+            <div style={{ fontSize: 13, opacity: 0.75, marginBottom: 10 }}>
+              {hasOverrideThisPage ? T.usingOverride : T.usingDefault}
+            </div>
+
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <button style={styles.primaryBtn} onClick={openPageBgPicker}>
+                {T.uploadThis}
+              </button>
+
+              <button
+                style={styles.secondaryBtn}
+                onClick={() => clearPageBgOverride(pageIndex)}
+                disabled={!hasOverrideThisPage}
+              >
+                {T.clearThis}
+              </button>
+
+              <button style={styles.secondaryBtn} onClick={() => setPageBgModalOpen(false)}>
+                {T.close}
+              </button>
+            </div>
+
+            <input
+              ref={pageBgInputRef}
+              type="file"
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={(e) => uploadPageBg(e.target.files?.[0], pageIndex)}
+            />
+          </div>
+        </div>
+      )}
+
+      {editModeModalOpen && (
+        <div style={styles.modalBg} onClick={() => setEditModeModalOpen(false)}>
+          <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>{T.changeMode}</div>
+
+            <div style={{ display: 'grid', gap: 12 }}>
+              <div style={{ fontWeight: 900, marginBottom: 4 }}>{T.pickTemplate}</div>
+              <TemplatePicker
+                lang={lang}
+                onPick={(fullId) => {
+                  setEditModeModalOpen(false);
+
+                  const data = makeInitialTemplateData(fullId, lang);
+                  const next = { mode: 'template', templateId: fullId, templateData: data, items: [] };
+
+                  setLayout(next);
+                  saveJson(KEYS.MENU_LAYOUT, next);
+                  setEdit(true);
+                  setPreview(false);
+                  setPageIndex(1);
+                  setTimeout(() => hardResetScrollTop('auto'), 0);
+                }}
+              />
+
+              <div style={{ height: 12 }} />
+
+              <button
+                style={styles.primaryBtn}
+                onClick={() => {
+                  const next = { ...layout, mode: 'custom', templateId: null, templateData: null };
+                  setLayout(next);
+                  saveJson(KEYS.MENU_LAYOUT, next);
+                  setEditModeModalOpen(false);
+                  setEdit(true);
+                  setPreview(false);
+                  setPageIndex(1);
+                  setTimeout(() => hardResetScrollTop('auto'), 0);
+                }}
+              >
+                {T.freeEdit}
+              </button>
+
+              <button style={styles.secondaryBtn} onClick={() => setEditModeModalOpen(false)}>
+                {T.close}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+
   const langWrapStyle = edit ? styles.langWrapEdit : styles.langWrapView;
+  const langRowStyle = edit ? styles.langRowEdit : styles.langRowView;
   const langBtnStyle = edit ? styles.langBtn : styles.langBtnView;
   const langBtnActiveStyle = edit ? styles.langBtnActive : styles.langBtnActiveView;
+
+  const renderViewPages = () => {
+    const pageWidthScaled = PAGE_WIDTH * effectiveScale;
+    const pageHeightScaled = PAGE_HEIGHT * effectiveScale;
+    const viewportWidth = vw || pageWidthScaled;
+    const trackViewportWidth = Math.min(viewportWidth, pageWidthScaled);
+    const pageOffset = (pageIndex - 1) * (PAGE_HEIGHT + PAGE_GAP);
+    const stageBg = getPageBgUrl(pageIndex);
+
+    return (
+      <div
+        ref={stageScrollRef}
+        style={{
+          ...styles.stage,
+          ...styles.viewNoSelect,
+          overflowY: 'hidden',
+          touchAction: 'none',
+          backgroundImage: stageBg ? `url(${stageBg})` : undefined,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center center',
+        }}
+        onWheel={onWheel}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+      >
+        <div
+          style={{
+            ...styles.viewTrackWrap,
+            width: trackViewportWidth,
+            maxWidth: '100%',
+            height: pageHeightScaled,
+            margin: '0 auto',
+            justifyContent: 'center',
+          }}
+        >
+          <div
+            style={{
+              ...styles.viewPageFrame,
+              width: pageWidthScaled,
+              height: pageHeightScaled,
+            }}
+          >
+            <div
+              style={{
+                ...styles.viewPageSurface,
+                transform: 'rotateY(0deg)',
+                transition: `transform ${TURN_ANIM_MS}ms ease, box-shadow ${TURN_ANIM_MS}ms ease`,
+                boxShadow: '0 20px 60px rgba(0,0,0,0.35)',
+              }}
+            >
+              <div
+                style={{
+                  ...styles.viewPageBg,
+                  backgroundImage: `url(${getPageBgUrl(pageIndex)})`,
+                  height: pageHeightScaled,
+                }}
+              />
+
+              <div style={{ ...styles.viewPageMask, height: pageHeightScaled }}>
+                <div
+                  style={{
+                    transform: `scale(${effectiveScale}) translateY(-${pageOffset / effectiveScale}px)`,
+                    transformOrigin: 'top left',
+                    width: PAGE_WIDTH,
+                  }}
+                >
+                  {renderCanvasLayer(`${PAGE_WIDTH}px`)}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderFloatingUi = () => {
+    if (preview) return null;
+
+    return (
+      <>
+        {!isOverlayOpen && (
+          <div style={langWrapStyle}>
+            <div style={langRowStyle}>
+              <button
+                style={{ ...langBtnStyle, ...(lang === 'en' ? langBtnActiveStyle : {}) }}
+                onClick={() => setLanguage('en')}
+                aria-label="English"
+                title="English"
+              >
+                🇺🇸
+              </button>
+              <button
+                style={{ ...langBtnStyle, ...(lang === 'ko' ? langBtnActiveStyle : {}) }}
+                onClick={() => setLanguage('ko')}
+                aria-label="Korean"
+                title="한국어"
+              >
+                🇰🇷
+              </button>
+            </div>
+
+            {!edit && showEditBtn && (
+              <button
+                style={styles.editBtn}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  requestEdit();
+                }}
+              >
+                {T.edit}
+              </button>
+            )}
+          </div>
+        )}
+
+        {!edit && !isOverlayOpen && totalPages > 1 && (
+          <div style={styles.viewPageHint}>
+            {pageIndex} / {totalPages}
+          </div>
+        )}
+
+        {!showEditBtn && !edit && (
+          <div
+            style={styles.secretHotspot}
+            onClick={onSecretCornerClick}
+            onMouseDown={startLongPress}
+            onMouseUp={cancelLongPress}
+            onMouseLeave={cancelLongPress}
+            onTouchStart={startLongPress}
+            onTouchEnd={cancelLongPress}
+            onTouchCancel={cancelLongPress}
+            aria-label="secret-edit-hotspot"
+          />
+        )}
+
+        {!isOverlayOpen && !edit && (
+          <button style={styles.backBtn} onClick={goIntro}>
+            {T.backToVideo}
+          </button>
+        )}
+      </>
+    );
+  };
 
   return (
     <div style={styles.container}>
@@ -990,14 +1481,17 @@ export default function MenuEditor() {
             <div style={styles.smallNote}>{T.keep}</div>
           </div>
         </div>
+      ) : pageTurnEnabled ? (
+        renderViewPages()
       ) : (
         <div
           ref={stageScrollRef}
           style={{
             ...styles.stage,
-            overflowY: pageTurnEnabled ? 'hidden' : 'auto',
-            WebkitOverflowScrolling: pageTurnEnabled ? 'auto' : 'touch',
-            touchAction: pageTurnEnabled ? 'none' : 'pan-y',
+            ...styles.viewNoSelect,
+            overflowY: 'auto',
+            WebkitOverflowScrolling: 'touch',
+            touchAction: 'pan-y',
           }}
           onWheel={onWheel}
           onTouchStart={onTouchStart}
@@ -1005,22 +1499,13 @@ export default function MenuEditor() {
           onTouchEnd={onTouchEnd}
         >
           {/* ✅ mover: 보기모드에서만 translate, 편집/미리보기는 none */}
-          <div
-            style={{
-              ...styles.viewportMover,
-              transform: pageTurnEnabled ? `translate3d(0, ${viewTranslateY}px, 0)` : 'none',
-              transition: pageTurnEnabled ? `transform ${TURN_ANIM_MS}ms ease` : 'none',
-              willChange: pageTurnEnabled ? 'transform' : 'auto',
-            }}
-          >
+          <div style={styles.viewportMover}>
             {/* ✅ content wrapper: 보기모드에서만 scale, 편집/미리보기는 1:1 크게 */}
             <div
               style={{
                 ...styles.page,
                 height: fullScrollHeight,
-                width: pageTurnEnabled ? `${100 / effectiveScale}%` : '100%',
-                transform: pageTurnEnabled ? `scale(${effectiveScale})` : 'none',
-                transformOrigin: 'top left',
+                width: '100%',
               }}
             >
               {renderBgPages()}
@@ -1049,28 +1534,6 @@ export default function MenuEditor() {
                     );
                   })}
                 </>
-              )}
-
-              {/* ✅ 언어 */}
-              {!isOverlayOpen && !preview && (
-                <div style={langWrapStyle}>
-                  <button
-                    style={{ ...langBtnStyle, ...(lang === 'en' ? langBtnActiveStyle : {}) }}
-                    onClick={() => setLanguage('en')}
-                    aria-label="English"
-                    title="English"
-                  >
-                    🇺🇸
-                  </button>
-                  <button
-                    style={{ ...langBtnStyle, ...(lang === 'ko' ? langBtnActiveStyle : {}) }}
-                    onClick={() => setLanguage('ko')}
-                    aria-label="Korean"
-                    title="한국어"
-                  >
-                    🇰🇷
-                  </button>
-                </div>
               )}
 
               {/* ✅ 편집 메뉴 */}
@@ -1144,21 +1607,6 @@ export default function MenuEditor() {
                 </div>
               )}
 
-              {/* ✅ secret hotspot */}
-              {!showEditBtn && !edit && !preview && (
-                <div
-                  style={styles.secretHotspot}
-                  onClick={onSecretCornerClick}
-                  onMouseDown={startLongPress}
-                  onMouseUp={cancelLongPress}
-                  onMouseLeave={cancelLongPress}
-                  onTouchStart={startLongPress}
-                  onTouchEnd={cancelLongPress}
-                  onTouchCancel={cancelLongPress}
-                  aria-label="secret-edit-hotspot"
-                />
-              )}
-
               {/* ✅ 편집 페이지 컨트롤(편집에서만) */}
               {edit && !preview && (
                 <div style={styles.pageCtrl} onMouseDown={(e) => e.stopPropagation()}>
@@ -1203,25 +1651,6 @@ export default function MenuEditor() {
               )}
 
               {/* ✅ 보기모드 페이지 인디케이터(옵션: 조용하게) */}
-              {!edit && !preview && !isOverlayOpen && totalPages > 1 && (
-                <div style={styles.viewPageHint}>
-                  {pageIndex} / {totalPages}
-                </div>
-              )}
-
-              {/* ✅ Edit 버튼 */}
-              {!edit && !preview && showEditBtn && !isOverlayOpen && (
-                <button
-                  style={styles.editBtn}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    requestEdit();
-                  }}
-                >
-                  {T.edit}
-                </button>
-              )}
-
               {!layout.mode && !preview && <div style={styles.helpHint}>{T.help}</div>}
 
               {layout.mode === 'template' && !preview && (
@@ -1424,152 +1853,13 @@ export default function MenuEditor() {
                 </div>
               )}
 
-              {/* ✅ PIN 모달 */}
-              {pinModalOpen && (
-                <div style={styles.modalBg} onClick={() => setPinModalOpen(false)}>
-                  <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-                    <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>{T.pinEnterTitle}</div>
-                    <div style={{ fontSize: 13, opacity: 0.75, marginBottom: 10 }}>{T.pinEnterDesc}</div>
-
-                    <input
-                      type="password"
-                      value={pinInput}
-                      onChange={(e) => setPinInput(e.target.value)}
-                      inputMode="numeric"
-                      placeholder={lang === 'ko' ? '4자리 숫자' : '4 digits'}
-                      style={styles.pinInput}
-                      maxLength={4}
-                      autoFocus
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') submitPin();
-                        if (e.key === 'Escape') setPinModalOpen(false);
-                      }}
-                    />
-
-                    {pinError && <div style={styles.errText}>{pinError}</div>}
-
-                    <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-                      <button style={styles.primaryBtn} onClick={submitPin}>
-                        {T.confirm}
-                      </button>
-                      <button style={styles.secondaryBtn} onClick={() => setPinModalOpen(false)}>
-                        {T.cancel}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* ✅ 비밀번호 설정 모달 */}
-              {settingsOpen && (
-                <div style={styles.modalBg} onClick={() => setSettingsOpen(false)}>
-                  <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-                    <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>{T.pinSettings}</div>
-
-                    <div style={{ fontWeight: 900, marginBottom: 6 }}>{T.pinChange}</div>
-
-                    <input
-                      type="password"
-                      value={curPinInput}
-                      onChange={(e) => setCurPinInput(e.target.value)}
-                      inputMode="numeric"
-                      placeholder={T.curPin}
-                      style={styles.pinInput}
-                      maxLength={4}
-                    />
-                    <input
-                      type="password"
-                      value={newPinInput}
-                      onChange={(e) => setNewPinInput(e.target.value)}
-                      inputMode="numeric"
-                      placeholder={T.newPin}
-                      style={styles.pinInput}
-                      maxLength={4}
-                    />
-                    <input
-                      type="password"
-                      value={newPinConfirm}
-                      onChange={(e) => setNewPinConfirm(e.target.value)}
-                      inputMode="numeric"
-                      placeholder={T.newPin2}
-                      style={styles.pinInput}
-                      maxLength={4}
-                    />
-
-                    {settingsError && <div style={styles.errText}>{settingsError}</div>}
-                    {settingsMsg && <div style={styles.okText}>{settingsMsg}</div>}
-
-                    <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-                      <button style={styles.primaryBtn} onClick={submitChangePin}>
-                        {T.change}
-                      </button>
-                      <button
-                        style={styles.secondaryBtn}
-                        onClick={() => {
-                          setSettingsOpen(false);
-                          setSettingsError('');
-                          setSettingsMsg('');
-                        }}
-                      >
-                        {T.close}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* ✅✅ 페이지 배경 모달 */}
-              {pageBgModalOpen && (
-                <div style={styles.modalBg} onClick={() => setPageBgModalOpen(false)}>
-                  <div style={styles.modal} onClick={(e) => e.stopPropagation()}>
-                    <div style={{ fontWeight: 900, fontSize: 18, marginBottom: 10 }}>{T.pageBgTitle}</div>
-
-                    <div style={{ fontWeight: 900, marginBottom: 8 }}>
-                      {T.currentPage}: {pageIndex} / {totalPages}
-                    </div>
-
-                    <div style={{ fontSize: 13, opacity: 0.75, marginBottom: 10 }}>
-                      {hasOverrideThisPage ? T.usingOverride : T.usingDefault}
-                    </div>
-
-                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                      <button style={styles.primaryBtn} onClick={openPageBgPicker}>
-                        {T.uploadThis}
-                      </button>
-
-                      <button
-                        style={styles.secondaryBtn}
-                        onClick={() => clearPageBgOverride(pageIndex)}
-                        disabled={!hasOverrideThisPage}
-                      >
-                        {T.clearThis}
-                      </button>
-
-                      <button style={styles.secondaryBtn} onClick={() => setPageBgModalOpen(false)}>
-                        {T.close}
-                      </button>
-                    </div>
-
-                    <input
-                      ref={pageBgInputRef}
-                      type="file"
-                      accept="image/*"
-                      style={{ display: 'none' }}
-                      onChange={(e) => uploadPageBg(e.target.files?.[0], pageIndex)}
-                    />
-                  </div>
-                </div>
-              )}
             </div>
           </div>
-          
-          {!isOverlayOpen && !edit && !preview && (
-            <button style={styles.backBtn} onClick={goIntro}>
-              {T.backToVideo}
-            </button>
-          )}
         </div>
       )}
+
+      {renderFloatingUi()}
+      {renderModals()}
     </div>
   );
 }
@@ -1702,12 +1992,74 @@ const styles = {
     width: '100%',
     height: '100%',
     overflowX: 'hidden',
-    background: '#000',
+    background: '#f3f3f3',
+  },
+
+  viewNoSelect: {
+    userSelect: 'none',
+    WebkitUserSelect: 'none',
+    WebkitTouchCallout: 'none',
+    WebkitTapHighlightColor: 'transparent',
   },
 
   viewportMover: {
     position: 'relative',
     width: '100%',
+  },
+
+  viewTrackWrap: {
+    position: 'relative',
+    width: '100%',
+    height: '100%',
+    overflow: 'hidden',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+  },
+
+  viewTrack: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+    height: '100%',
+  },
+
+  viewPageFrame: {
+    position: 'relative',
+    flex: '0 0 auto',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    perspective: 1600,
+  },
+
+  viewPageSurface: {
+    position: 'relative',
+    width: '100%',
+    height: '100%',
+    borderRadius: 24,
+    overflow: 'hidden',
+    background: '#000',
+    transformStyle: 'preserve-3d',
+    backfaceVisibility: 'hidden',
+  },
+
+  viewPageBg: {
+    position: 'absolute',
+    inset: 0,
+    backgroundRepeat: 'no-repeat',
+    backgroundPosition: 'top center',
+    backgroundSize: '100% 100%',
+    zIndex: 1,
+    filter: 'drop-shadow(0 10px 24px rgba(0,0,0,0.25))',
+  },
+
+  viewPageMask: {
+    position: 'relative',
+    zIndex: 2,
+    overflow: 'hidden',
+    width: '100%',
+    borderRadius: 24,
   },
 
   page: {
@@ -1729,21 +2081,35 @@ const styles = {
 
   langWrapEdit: {
     position: 'fixed',
-    top: 'calc(env(safe-area-inset-top, 0px) + 28px)',
+    top: 'calc(env(safe-area-inset-top, 0px) + 18px)',
     right: 16,
     zIndex: 99999,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
+    alignItems: 'flex-end',
+  },
+
+  langWrapView: {
+    position: 'fixed',
+    top: 'calc(env(safe-area-inset-top, 0px) + 32px)',
+    right: 'calc(env(safe-area-inset-right, 0px) + 20px)',
+    zIndex: 99999,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 10,
+    alignItems: 'flex-end',
+  },
+
+  langRowEdit: {
     display: 'flex',
     gap: 8,
     alignItems: 'center',
   },
 
-  langWrapView: {
-    position: 'fixed',
-    top: 'calc(env(safe-area-inset-top, 0px) + 110px)',
-    right: 'calc(env(safe-area-inset-right, 0px) + 20px)',
-    zIndex: 99999,
+  langRowView: {
     display: 'flex',
-    gap: 16,
+    gap: 12,
     alignItems: 'center',
   },
 
@@ -1765,18 +2131,18 @@ const styles = {
   },
 
   langBtnView: {
-    width: 80,
-    height: 64,
-    borderRadius: 20,
+    width: 56,
+    height: 44,
+    borderRadius: 14,
     border: '1px solid rgba(255,255,255,0.6)',
     background: 'rgba(0,0,0,0.48)',
     cursor: 'pointer',
-    fontSize: 36,
-    lineHeight: 1.1,
+    fontSize: 24,
+    lineHeight: 1,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    boxShadow: '0 8px 28px rgba(0,0,0,0.35)',
+    boxShadow: '0 6px 18px rgba(0,0,0,0.3)',
     padding: 0,
   },
   langBtnActiveView: {
@@ -1839,15 +2205,16 @@ const styles = {
   },
 
   editBtn: {
-    position: 'fixed',
-    top: 58,
-    right: 16,
+    alignSelf: 'flex-end',
     padding: '10px 14px',
     borderRadius: 12,
-    border: 'none',
+    border: '1px solid rgba(255,255,255,0.35)',
     cursor: 'pointer',
     fontWeight: 900,
-    zIndex: 999999,
+    background: 'rgba(0,0,0,0.7)',
+    color: '#fff',
+    boxShadow: '0 8px 20px rgba(0,0,0,0.4)',
+    minWidth: 88,
   },
 
   pageCtrl: {
@@ -1885,14 +2252,17 @@ const styles = {
   viewPageHint: {
     position: 'fixed',
     left: 16,
-    top: 64,
+    top: 'calc(env(safe-area-inset-top, 0px) + 32px)',
     zIndex: 99999,
-    padding: '8px 10px',
-    borderRadius: 10,
-    background: 'rgba(0,0,0,0.45)',
+    minHeight: 44,
+    padding: '10px 12px',
+    borderRadius: 12,
+    background: 'rgba(0,0,0,0.48)',
     color: '#fff',
     fontWeight: 900,
-    fontSize: 13,
+    fontSize: 15,
+    display: 'flex',
+    alignItems: 'center',
     userSelect: 'none',
   },
 
