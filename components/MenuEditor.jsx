@@ -351,6 +351,56 @@ export default function MenuEditor() {
     } catch {}
   }, []);
 
+  // ✅ 보기 모드에서 텍스트 길게 눌러도 선택/터치 콜아웃이 뜨지 않도록 body 단위 차단
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+
+    const body = document.body;
+    const html = document.documentElement;
+
+    if (!body || !html) return;
+
+    const prevBody = {
+      userSelect: body.style.userSelect,
+      webkitUserSelect: body.style.webkitUserSelect,
+      webkitTouchCallout: body.style.webkitTouchCallout,
+    };
+    const prevHtml = {
+      userSelect: html.style.userSelect,
+      webkitUserSelect: html.style.webkitUserSelect,
+      webkitTouchCallout: html.style.webkitTouchCallout,
+    };
+
+    if (!edit) {
+      const applyNoSelect = (el) => {
+        el.style.userSelect = 'none';
+        el.style.webkitUserSelect = 'none';
+        el.style.webkitTouchCallout = 'none';
+      };
+
+      applyNoSelect(body);
+      applyNoSelect(html);
+    } else {
+      body.style.userSelect = prevBody.userSelect;
+      body.style.webkitUserSelect = prevBody.webkitUserSelect;
+      body.style.webkitTouchCallout = prevBody.webkitTouchCallout;
+
+      html.style.userSelect = prevHtml.userSelect;
+      html.style.webkitUserSelect = prevHtml.webkitUserSelect;
+      html.style.webkitTouchCallout = prevHtml.webkitTouchCallout;
+    }
+
+    return () => {
+      body.style.userSelect = prevBody.userSelect;
+      body.style.webkitUserSelect = prevBody.webkitUserSelect;
+      body.style.webkitTouchCallout = prevBody.webkitTouchCallout;
+
+      html.style.userSelect = prevHtml.userSelect;
+      html.style.webkitUserSelect = prevHtml.webkitUserSelect;
+      html.style.webkitTouchCallout = prevHtml.webkitTouchCallout;
+    };
+  }, [edit]);
+
   // ✅ (백업) Shift+E 누르면 edit 버튼 강제 노출 (버튼만, 실제 편집은 PIN 필요)
   useEffect(() => {
     const onKey = (e) => {
@@ -2024,7 +2074,7 @@ const styles = {
 
   langWrapView: {
     position: 'fixed',
-    top: 'calc(env(safe-area-inset-top, 0px) + 20px)',
+    top: 'calc(env(safe-area-inset-top, 0px) + 32px)',
     right: 'calc(env(safe-area-inset-right, 0px) + 20px)',
     zIndex: 99999,
     display: 'flex',
