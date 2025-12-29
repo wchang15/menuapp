@@ -845,13 +845,6 @@ export default function MenuEditor() {
     return -((pageIndex - 1) * (PAGE_WIDTH + PAGE_GAP) * effectiveScale);
   }, [pageIndex, effectiveScale]);
 
-  const viewSidePadding = useMemo(() => {
-    if (!pageTurnEnabled) return 0;
-    const scaledWidth = PAGE_WIDTH * effectiveScale;
-    const pad = ((vw || scaledWidth) - scaledWidth) / 2;
-    return Math.max(0, pad);
-  }, [pageTurnEnabled, vw, effectiveScale]);
-
   // ✅ pageTurnEnabled 켜질 때: 스크롤 잔상 제거
   useEffect(() => {
     if (!pageTurnEnabled) return;
@@ -1285,6 +1278,7 @@ export default function MenuEditor() {
     const pageWidthScaled = PAGE_WIDTH * effectiveScale;
     const pageHeightScaled = PAGE_HEIGHT * effectiveScale;
     const pageGapPx = PAGE_GAP * effectiveScale;
+    const viewWindowWidth = Math.min(vw || pageWidthScaled, pageWidthScaled);
 
     return (
       <div
@@ -1300,13 +1294,18 @@ export default function MenuEditor() {
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
       >
-            <div style={styles.viewTrackWrap}>
+            <div
+              style={{
+                ...styles.viewTrackWrap,
+                width: viewWindowWidth,
+                maxWidth: '100%',
+                margin: '0 auto',
+              }}
+            >
               <div
                 style={{
                   ...styles.viewTrack,
                   gap: pageGapPx,
-                  paddingLeft: viewSidePadding,
-                  paddingRight: viewSidePadding,
                   transform: `translate3d(${viewTranslateX}px, 0, 0)`,
                   transition: `transform ${TURN_ANIM_MS}ms cubic-bezier(0.25, 0.8, 0.4, 1)`,
                 }}
