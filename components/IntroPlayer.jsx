@@ -145,7 +145,8 @@ const styles = {
   video: {
     width: '100%',
     height: '100%',
-    objectFit: 'contain',
+    // 전체 화면을 채워 검은 여백이 생기지 않도록 cover로 변경
+    objectFit: 'cover',
   },
   uploadBox: {
     color: '#fff',

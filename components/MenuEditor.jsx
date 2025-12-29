@@ -279,7 +279,7 @@ export default function MenuEditor() {
   // ✅ 페이지 배경 설정 모달
   const [pageBgModalOpen, setPageBgModalOpen] = useState(false);
 
-  // ✅ viewport height (보기모드 scale용)
+  // ✅ viewport 크기 (보기모드 scale용)
   const [vh, setVh] = useState(900);
   const [vw, setVw] = useState(1080);
 
@@ -305,7 +305,8 @@ export default function MenuEditor() {
         .map((v) => Number(v) || 0)
         .filter(Boolean);
 
-      setVh(heightCandidates.length ? Math.max(...heightCandidates) : 900);
+      // ✅ 높이는 가장 작은 후보를 사용해야 실제 보이는 영역을 넘겨서 잘리는 일이 없음
+      setVh(heightCandidates.length ? Math.min(...heightCandidates) : 900);
       setVw(widthCandidates.length ? Math.max(...widthCandidates) : 1080);
     };
 
@@ -849,11 +850,11 @@ export default function MenuEditor() {
     return !!bgUrl && !edit && !preview && !isOverlayOpen;
   }, [bgUrl, edit, preview, isOverlayOpen]);
 
-  // ✅ 보기모드 스케일(화면 높이에 맞추기) / 편집&미리보기는 1:1(크게)
+  // ✅ 보기모드 스케일 / 편집&미리보기는 1:1(크게)
   const viewScale = useMemo(() => {
-    const s = (vh || 900) / PAGE_HEIGHT;
-    return Math.max(0.25, Math.min(1, s));
-  }, [vh]);
+    const widthScale = (vw || PAGE_WIDTH) / PAGE_WIDTH;
+    return Math.max(0.25, Math.min(1.1, widthScale));
+  }, [vw]);
 
   const effectiveScale = useMemo(() => {
     return pageTurnEnabled ? viewScale : 1;
@@ -866,6 +867,11 @@ export default function MenuEditor() {
   const viewTranslateX = useMemo(() => {
     return -((pageIndex - 1) * (PAGE_WIDTH + PAGE_GAP) * effectiveScale);
   }, [pageIndex, effectiveScale]);
+
+  const allowVerticalScroll = useMemo(() => {
+    const pageHeightScaled = PAGE_HEIGHT * effectiveScale;
+    return pageTurnEnabled && pageHeightScaled > (vh || pageHeightScaled);
+  }, [effectiveScale, pageTurnEnabled, vh]);
 
   // ✅ pageTurnEnabled 켜질 때: 스크롤 잔상 제거
   useEffect(() => {
@@ -968,13 +974,16 @@ export default function MenuEditor() {
   // ✅ 보기모드 스와이프/휠 처리
   const wheelAccRef = useRef(0);
   const wheelLockRef = useRef(false);
-  const touchRef = useRef({ x: 0, active: false });
+  const touchRef = useRef({ x: 0, y: 0, active: false });
 
   const goPrevPage = () => setPageIndex((p) => Math.max(1, p - 1));
   const goNextPage = () => setPageIndex((p) => Math.min(totalPages, p + 1));
 
   const onWheel = (e) => {
     if (!pageTurnEnabled) return;
+
+    // 세로 스크롤이 필요하면 그대로 통과
+    if (allowVerticalScroll && Math.abs(e.deltaY) > Math.abs(e.deltaX)) return;
 
     // 스크롤 막고, 페이지 전환만
     e.preventDefault();
@@ -1000,31 +1009,40 @@ export default function MenuEditor() {
 
   const onTouchStart = (e) => {
     if (!pageTurnEnabled) return;
-    const x = e.touches?.[0]?.clientX;
-    if (typeof x !== 'number') return;
-    touchRef.current = { x, active: true };
+    const touch = e.touches?.[0];
+    const x = touch?.clientX;
+    const y = touch?.clientY;
+    if (typeof x !== 'number' || typeof y !== 'number') return;
+    touchRef.current = { x, y, active: true };
   };
 
   const onTouchMove = (e) => {
     if (!pageTurnEnabled) return;
-    // 스크롤 막기
-    e.preventDefault();
+    if (!allowVerticalScroll) {
+      // 스크롤 막기
+      e.preventDefault();
+    }
   };
 
   const onTouchEnd = (e) => {
     if (!pageTurnEnabled) return;
     if (!touchRef.current.active) return;
 
-    const x2 = e.changedTouches?.[0]?.clientX;
+    const t = e.changedTouches?.[0];
+    const x2 = t?.clientX;
+    const y2 = t?.clientY;
     if (typeof x2 !== 'number') {
-      touchRef.current = { x: 0, active: false };
+      touchRef.current = { x: 0, y: 0, active: false };
       return;
     }
 
     const dx = x2 - touchRef.current.x;
-    touchRef.current = { x: 0, active: false };
+    const dy = typeof y2 === 'number' ? y2 - touchRef.current.y : 0;
+    touchRef.current = { x: 0, y: 0, active: false };
 
     if (Math.abs(dx) < TOUCH_THRESHOLD) return;
+
+    if (allowVerticalScroll && Math.abs(dy) > Math.abs(dx)) return;
 
     // 오른쪽->왼쪽(dx<0) => 다음, 왼쪽->오른쪽(dx>0) => 이전
     if (dx < 0) goNextPage();
@@ -1300,7 +1318,7 @@ export default function MenuEditor() {
     const pageWidthScaled = PAGE_WIDTH * effectiveScale;
     const pageHeightScaled = PAGE_HEIGHT * effectiveScale;
     const pageGapPx = PAGE_GAP * effectiveScale;
-    const viewWindowWidth = Math.min(vw || pageWidthScaled, pageWidthScaled);
+    const viewWindowWidth = Math.min(vw || pageWidthScaled, pageWidthScaled * 1.05);
 
     return (
       <div
@@ -1308,8 +1326,8 @@ export default function MenuEditor() {
         style={{
           ...styles.stage,
           ...styles.viewNoSelect,
-          overflowY: 'hidden',
-          touchAction: 'none',
+          overflowY: allowVerticalScroll ? 'auto' : 'hidden',
+          touchAction: allowVerticalScroll ? 'pan-y' : 'none',
         }}
         onWheel={onWheel}
         onTouchStart={onTouchStart}
@@ -1317,13 +1335,13 @@ export default function MenuEditor() {
         onTouchEnd={onTouchEnd}
       >
             <div
-              style={{
-                ...styles.viewTrackWrap,
-                width: viewWindowWidth,
-                maxWidth: '100%',
-                margin: '0 auto',
-              }}
-            >
+            style={{
+              ...styles.viewTrackWrap,
+              width: viewWindowWidth,
+              maxWidth: '100%',
+              margin: '0 auto',
+            }}
+          >
               <div
                 style={{
                   ...styles.viewTrack,
