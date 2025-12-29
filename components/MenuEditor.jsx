@@ -1373,7 +1373,7 @@ export default function MenuEditor() {
                     <div style={{ ...styles.viewPageMask, height: pageHeightScaled }}>
                       <div
                         style={{
-                          transform: `scale(${effectiveScale}) translateY(-${pageOffset}px)`,
+                          transform: `scale(${effectiveScale}) translateY(-${pageOffset / effectiveScale}px)`,
                           transformOrigin: 'top left',
                           width: PAGE_WIDTH,
                         }}
