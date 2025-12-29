@@ -861,14 +861,6 @@ export default function MenuEditor() {
     return pageTurnEnabled ? viewScale : 1;
   }, [pageTurnEnabled, viewScale]);
 
-  const viewTranslateY = useMemo(() => {
-    return -((pageIndex - 1) * (PAGE_HEIGHT + PAGE_GAP) * effectiveScale);
-  }, [pageIndex, effectiveScale]);
-
-  const viewTranslateX = useMemo(() => {
-    return -((pageIndex - 1) * (PAGE_WIDTH + PAGE_GAP) * effectiveScale);
-  }, [pageIndex, effectiveScale]);
-
   // ✅ pageTurnEnabled 켜질 때: 스크롤 잔상 제거
   useEffect(() => {
     if (!pageTurnEnabled) return;
@@ -1301,9 +1293,9 @@ export default function MenuEditor() {
   const renderViewPages = () => {
     const pageWidthScaled = PAGE_WIDTH * effectiveScale;
     const pageHeightScaled = PAGE_HEIGHT * effectiveScale;
-    const pageGapPx = PAGE_GAP * effectiveScale;
     const viewportWidth = vw || pageWidthScaled;
     const trackViewportWidth = Math.min(viewportWidth, pageWidthScaled);
+    const pageOffset = (pageIndex - 1) * (PAGE_HEIGHT + PAGE_GAP);
     const stageBg = getPageBgUrl(pageIndex);
 
     return (
@@ -1323,71 +1315,51 @@ export default function MenuEditor() {
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
       >
+        <div
+          style={{
+            ...styles.viewTrackWrap,
+            width: trackViewportWidth,
+            maxWidth: '100%',
+            height: pageHeightScaled,
+            margin: '0 auto',
+            justifyContent: 'center',
+          }}
+        >
+          <div
+            style={{
+              ...styles.viewPageFrame,
+              width: pageWidthScaled,
+              height: pageHeightScaled,
+            }}
+          >
             <div
               style={{
-                ...styles.viewTrackWrap,
-                width: trackViewportWidth,
-                maxWidth: '100%',
-                height: pageHeightScaled,
-                margin: '0 auto',
+                ...styles.viewPageSurface,
+                transform: 'rotateY(0deg)',
+                transition: `transform ${TURN_ANIM_MS}ms ease, box-shadow ${TURN_ANIM_MS}ms ease`,
+                boxShadow: '0 20px 60px rgba(0,0,0,0.35)',
               }}
             >
               <div
                 style={{
-                  ...styles.viewTrack,
-                  gap: pageGapPx,
-                  transform: `translate3d(${viewTranslateX}px, 0, 0)`,
-                  transition: `transform ${TURN_ANIM_MS}ms cubic-bezier(0.25, 0.8, 0.4, 1)`,
+                  ...styles.viewPageBg,
+                  backgroundImage: `url(${getPageBgUrl(pageIndex)})`,
+                  height: pageHeightScaled,
                 }}
-              >
-            {Array.from({ length: totalPages }).map((_, i) => {
-              const pageNum = i + 1;
-              const pageOffset = (pageNum - 1) * (PAGE_HEIGHT + PAGE_GAP);
-              const tilt = pageNum === pageIndex ? 0 : pageNum < pageIndex ? -4 : 4;
+              />
 
-              return (
+              <div style={{ ...styles.viewPageMask, height: pageHeightScaled }}>
                 <div
-                  key={pageNum}
                   style={{
-                    ...styles.viewPageFrame,
-                    width: pageWidthScaled,
-                    height: pageHeightScaled,
+                    transform: `scale(${effectiveScale}) translateY(-${pageOffset / effectiveScale}px)`,
+                    transformOrigin: 'top left',
+                    width: PAGE_WIDTH,
                   }}
                 >
-                  <div
-                    style={{
-                      ...styles.viewPageSurface,
-                      transform: `rotateY(${tilt}deg)`,
-                      transition: `transform ${TURN_ANIM_MS}ms ease, box-shadow ${TURN_ANIM_MS}ms ease`,
-                      boxShadow:
-                        pageNum === pageIndex
-                          ? '0 20px 60px rgba(0,0,0,0.35)'
-                          : '0 10px 36px rgba(0,0,0,0.28)',
-                    }}
-                  >
-                    <div
-                      style={{
-                        ...styles.viewPageBg,
-                        backgroundImage: `url(${getPageBgUrl(pageNum)})`,
-                        height: pageHeightScaled,
-                      }}
-                    />
-
-                    <div style={{ ...styles.viewPageMask, height: pageHeightScaled }}>
-                      <div
-                        style={{
-                          transform: `scale(${effectiveScale}) translateY(-${pageOffset / effectiveScale}px)`,
-                          transformOrigin: 'top left',
-                          width: PAGE_WIDTH,
-                        }}
-                      >
-                        {renderCanvasLayer(`${PAGE_WIDTH}px`)}
-                      </div>
-                    </div>
-                  </div>
+                  {renderCanvasLayer(`${PAGE_WIDTH}px`)}
                 </div>
-              );
-            })}
+              </div>
+            </div>
           </div>
         </div>
       </div>
