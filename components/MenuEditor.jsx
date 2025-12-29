@@ -284,17 +284,39 @@ export default function MenuEditor() {
   const [vw, setVw] = useState(1080);
 
   useEffect(() => {
-    const update = () => setVh(window.innerHeight || 900);
-    update();
-    window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
-  }, []);
+    const update = () => {
+      const vv = typeof window !== 'undefined' ? window.visualViewport : null;
 
-  useEffect(() => {
-    const update = () => setVw(window.innerWidth || 1080);
+      const heightCandidates = [
+        vv?.height,
+        window.innerHeight,
+        window.screen?.height,
+        window.screen?.availHeight,
+      ]
+        .map((v) => Number(v) || 0)
+        .filter(Boolean);
+
+      const widthCandidates = [
+        vv?.width,
+        window.innerWidth,
+        window.screen?.width,
+        window.screen?.availWidth,
+      ]
+        .map((v) => Number(v) || 0)
+        .filter(Boolean);
+
+      setVh(heightCandidates.length ? Math.max(...heightCandidates) : 900);
+      setVw(widthCandidates.length ? Math.max(...widthCandidates) : 1080);
+    };
+
     update();
     window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', update);
+
+    return () => {
+      window.removeEventListener('resize', update);
+      if (window.visualViewport) window.visualViewport.removeEventListener('resize', update);
+    };
   }, []);
 
   // ✅ (핵심) 스크롤을 확실히 0으로 리셋하는 함수
@@ -2250,14 +2272,17 @@ const styles = {
   viewPageHint: {
     position: 'fixed',
     left: 16,
-    top: 64,
+    top: 'calc(env(safe-area-inset-top, 0px) + 32px)',
     zIndex: 99999,
-    padding: '8px 10px',
-    borderRadius: 10,
-    background: 'rgba(0,0,0,0.45)',
+    minHeight: 44,
+    padding: '10px 12px',
+    borderRadius: 12,
+    background: 'rgba(0,0,0,0.48)',
     color: '#fff',
     fontWeight: 900,
-    fontSize: 13,
+    fontSize: 15,
+    display: 'flex',
+    alignItems: 'center',
     userSelect: 'none',
   },
 
