@@ -22,7 +22,7 @@ const DEFAULT_PIN = '0000';
 const LANG_KEY = 'APP_LANG_V1';
 
 // ✅ “페이지” 단위(편집용)
-const PAGE_HEIGHT = 2200;
+const PAGE_HEIGHT = 1200;
 const PAGE_GAP = 40;
 const MIN_CONTENT_HEIGHT = PAGE_HEIGHT;
 
@@ -852,7 +852,7 @@ export default function MenuEditor() {
   // ✅ 보기모드 스케일(화면 높이에 맞추기) / 편집&미리보기는 1:1(크게)
   const viewScale = useMemo(() => {
     const s = (vh || 900) / PAGE_HEIGHT;
-    return Math.max(0.25, Math.min(1, s));
+    return Math.max(0.5, Math.min(1, s));
   }, [vh]);
 
   const effectiveScale = useMemo(() => {
@@ -2092,9 +2092,9 @@ const styles = {
     position: 'fixed',
     top: 0,
     right: 0,
-    width: 140,
-    height: 140,
-    zIndex: 999999,
+    width: 110,
+    height: 110,
+    zIndex: 99990,
     background: 'transparent',
     touchAction: 'none',
   },
@@ -2103,7 +2103,7 @@ const styles = {
     position: 'fixed',
     top: 'calc(env(safe-area-inset-top, 0px) + 18px)',
     right: 16,
-    zIndex: 99999,
+    zIndex: 100001,
     display: 'flex',
     flexDirection: 'column',
     gap: 8,
@@ -2114,7 +2114,7 @@ const styles = {
     position: 'fixed',
     top: 'calc(env(safe-area-inset-top, 0px) + 32px)',
     right: 'calc(env(safe-area-inset-right, 0px) + 20px)',
-    zIndex: 99999,
+    zIndex: 100001,
     display: 'flex',
     flexDirection: 'column',
     gap: 10,

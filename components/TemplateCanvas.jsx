@@ -20,7 +20,7 @@ export default function TemplateCanvas({
   editing = false,
   uiMode = 'edit', // 'edit' | 'preview'
   lang = 'ko',
-  pageHeight = 2200,
+  pageHeight = 1200,
   pageGap = 40,
   fullScrollHeight,
   panelOpen = true,
