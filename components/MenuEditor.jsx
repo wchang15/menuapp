@@ -1292,9 +1292,16 @@ export default function MenuEditor() {
             })}
           </div>
         </div>
+      </div>
+    );
+  };
 
-        {/* ✅ View overlays */}
-        {!isOverlayOpen && !preview && (
+  const renderFloatingUi = () => {
+    if (preview) return null;
+
+    return (
+      <>
+        {!isOverlayOpen && (
           <div style={langWrapStyle}>
             <button
               style={{ ...langBtnStyle, ...(lang === 'en' ? langBtnActiveStyle : {}) }}
@@ -1315,13 +1322,13 @@ export default function MenuEditor() {
           </div>
         )}
 
-        {!edit && !preview && !isOverlayOpen && totalPages > 1 && (
+        {!edit && !isOverlayOpen && totalPages > 1 && (
           <div style={styles.viewPageHint}>
             {pageIndex} / {totalPages}
           </div>
         )}
 
-        {!showEditBtn && !edit && !preview && (
+        {!showEditBtn && !edit && (
           <div
             style={styles.secretHotspot}
             onClick={onSecretCornerClick}
@@ -1335,7 +1342,7 @@ export default function MenuEditor() {
           />
         )}
 
-        {!edit && !preview && showEditBtn && !isOverlayOpen && (
+        {!edit && showEditBtn && !isOverlayOpen && (
           <button
             style={styles.editBtn}
             onClick={(e) => {
@@ -1347,12 +1354,12 @@ export default function MenuEditor() {
           </button>
         )}
 
-        {!isOverlayOpen && !edit && !preview && (
+        {!isOverlayOpen && !edit && (
           <button style={styles.backBtn} onClick={goIntro}>
             {T.backToVideo}
           </button>
         )}
-      </div>
+      </>
     );
   };
 
@@ -1456,28 +1463,6 @@ export default function MenuEditor() {
                 </>
               )}
 
-              {/* ✅ 언어 */}
-              {!isOverlayOpen && !preview && (
-                <div style={langWrapStyle}>
-                  <button
-                    style={{ ...langBtnStyle, ...(lang === 'en' ? langBtnActiveStyle : {}) }}
-                    onClick={() => setLanguage('en')}
-                    aria-label="English"
-                    title="English"
-                  >
-                    🇺🇸
-                  </button>
-                  <button
-                    style={{ ...langBtnStyle, ...(lang === 'ko' ? langBtnActiveStyle : {}) }}
-                    onClick={() => setLanguage('ko')}
-                    aria-label="Korean"
-                    title="한국어"
-                  >
-                    🇰🇷
-                  </button>
-                </div>
-              )}
-
               {/* ✅ 편집 메뉴 */}
               {edit && !preview && !isOverlayOpen && (
                 <div style={styles.editorMenuBar} onMouseDown={(e) => e.stopPropagation()}>
@@ -1549,21 +1534,6 @@ export default function MenuEditor() {
                 </div>
               )}
 
-              {/* ✅ secret hotspot */}
-              {!showEditBtn && !edit && !preview && (
-                <div
-                  style={styles.secretHotspot}
-                  onClick={onSecretCornerClick}
-                  onMouseDown={startLongPress}
-                  onMouseUp={cancelLongPress}
-                  onMouseLeave={cancelLongPress}
-                  onTouchStart={startLongPress}
-                  onTouchEnd={cancelLongPress}
-                  onTouchCancel={cancelLongPress}
-                  aria-label="secret-edit-hotspot"
-                />
-              )}
-
               {/* ✅ 편집 페이지 컨트롤(편집에서만) */}
               {edit && !preview && (
                 <div style={styles.pageCtrl} onMouseDown={(e) => e.stopPropagation()}>
@@ -1608,25 +1578,6 @@ export default function MenuEditor() {
               )}
 
               {/* ✅ 보기모드 페이지 인디케이터(옵션: 조용하게) */}
-              {!edit && !preview && !isOverlayOpen && totalPages > 1 && (
-                <div style={styles.viewPageHint}>
-                  {pageIndex} / {totalPages}
-                </div>
-              )}
-
-              {/* ✅ Edit 버튼 */}
-              {!edit && !preview && showEditBtn && !isOverlayOpen && (
-                <button
-                  style={styles.editBtn}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    requestEdit();
-                  }}
-                >
-                  {T.edit}
-                </button>
-              )}
-
               {!layout.mode && !preview && <div style={styles.helpHint}>{T.help}</div>}
 
               {layout.mode === 'template' && !preview && (
@@ -1831,15 +1782,10 @@ export default function MenuEditor() {
 
             </div>
           </div>
-          
-          {!isOverlayOpen && !edit && !preview && (
-            <button style={styles.backBtn} onClick={goIntro}>
-              {T.backToVideo}
-            </button>
-          )}
         </div>
       )}
 
+      {renderFloatingUi()}
       {renderModals()}
     </div>
   );
