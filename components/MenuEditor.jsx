@@ -1302,7 +1302,8 @@ export default function MenuEditor() {
     const pageWidthScaled = PAGE_WIDTH * effectiveScale;
     const pageHeightScaled = PAGE_HEIGHT * effectiveScale;
     const pageGapPx = PAGE_GAP * effectiveScale;
-    const viewWindowWidth = Math.min(vw || pageWidthScaled, pageWidthScaled);
+    const viewportWidth = vw || pageWidthScaled;
+    const centerOffsetX = Math.max(0, (viewportWidth - pageWidthScaled) / 2);
     const stageBg = getPageBgUrl(pageIndex);
 
     return (
@@ -1325,16 +1326,14 @@ export default function MenuEditor() {
             <div
               style={{
                 ...styles.viewTrackWrap,
-                width: viewWindowWidth,
-                maxWidth: '100%',
-                margin: '0 auto',
+                width: '100%',
               }}
             >
               <div
                 style={{
                   ...styles.viewTrack,
                   gap: pageGapPx,
-                  transform: `translate3d(${viewTranslateX}px, 0, 0)`,
+                  transform: `translate3d(${viewTranslateX + centerOffsetX}px, 0, 0)`,
                   transition: `transform ${TURN_ANIM_MS}ms cubic-bezier(0.25, 0.8, 0.4, 1)`,
                 }}
               >
