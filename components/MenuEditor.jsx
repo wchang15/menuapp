@@ -30,6 +30,7 @@ const MIN_CONTENT_HEIGHT = PAGE_HEIGHT;
 const DEFAULT_ROW_H = 92;
 const DEFAULT_HEADER_H = 210;
 const DEFAULT_PAGE_PADDING_TOP = 70;
+const PAGE_WIDTH = 1080;
 
 // ✅ T2 사진 슬롯과 동일
 const MAX_PHOTOS = 8;
@@ -782,6 +783,10 @@ export default function MenuEditor() {
     return -((pageIndex - 1) * (PAGE_HEIGHT + PAGE_GAP) * effectiveScale);
   }, [pageIndex, effectiveScale]);
 
+  const viewTranslateX = useMemo(() => {
+    return -((pageIndex - 1) * (PAGE_WIDTH + PAGE_GAP) * effectiveScale);
+  }, [pageIndex, effectiveScale]);
+
   // ✅ pageTurnEnabled 켜질 때: 스크롤 잔상 제거
   useEffect(() => {
     if (!pageTurnEnabled) return;
@@ -841,6 +846,11 @@ export default function MenuEditor() {
 
   const handleExitPreview = () => setPreview(false);
 
+  const getPageBgUrl = (pageNum) => {
+    const overrideUrl = bgOverrideUrls?.[String(pageNum)] || bgOverrideUrls?.[pageNum];
+    return overrideUrl || bgUrl;
+  };
+
   // ✅✅ 배경 렌더: 페이지별 오버라이드가 있으면 그거, 없으면 default(bgUrl)
   const renderBgPages = () => {
     if (!bgUrl) return null;
@@ -848,8 +858,7 @@ export default function MenuEditor() {
     const pagesForBg = pageTurnEnabled ? totalPages : totalPages; // 동일, 구조만 명시
     return Array.from({ length: pagesForBg }).map((_, i) => {
       const pageNum = i + 1;
-      const overrideUrl = bgOverrideUrls?.[String(pageNum)] || bgOverrideUrls?.[pageNum];
-      const useUrl = overrideUrl || bgUrl;
+      const useUrl = getPageBgUrl(pageNum);
 
       const top = i * (PAGE_HEIGHT + PAGE_GAP);
       return (
@@ -879,7 +888,7 @@ export default function MenuEditor() {
   // ✅ 보기모드 스와이프/휠 처리
   const wheelAccRef = useRef(0);
   const wheelLockRef = useRef(false);
-  const touchRef = useRef({ y: 0, active: false });
+  const touchRef = useRef({ x: 0, active: false });
 
   const goPrevPage = () => setPageIndex((p) => Math.max(1, p - 1));
   const goNextPage = () => setPageIndex((p) => Math.min(totalPages, p + 1));
@@ -891,7 +900,9 @@ export default function MenuEditor() {
     e.preventDefault();
     if (wheelLockRef.current) return;
 
-    wheelAccRef.current += e.deltaY;
+    const primaryDelta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+
+    wheelAccRef.current += primaryDelta;
 
     if (Math.abs(wheelAccRef.current) >= WHEEL_THRESHOLD) {
       const dy = wheelAccRef.current;
@@ -909,9 +920,9 @@ export default function MenuEditor() {
 
   const onTouchStart = (e) => {
     if (!pageTurnEnabled) return;
-    const y = e.touches?.[0]?.clientY;
-    if (typeof y !== 'number') return;
-    touchRef.current = { y, active: true };
+    const x = e.touches?.[0]?.clientX;
+    if (typeof x !== 'number') return;
+    touchRef.current = { x, active: true };
   };
 
   const onTouchMove = (e) => {
@@ -924,20 +935,173 @@ export default function MenuEditor() {
     if (!pageTurnEnabled) return;
     if (!touchRef.current.active) return;
 
-    const y2 = e.changedTouches?.[0]?.clientY;
-    if (typeof y2 !== 'number') {
-      touchRef.current = { y: 0, active: false };
+    const x2 = e.changedTouches?.[0]?.clientX;
+    if (typeof x2 !== 'number') {
+      touchRef.current = { x: 0, active: false };
       return;
     }
 
-    const dy = y2 - touchRef.current.y;
-    touchRef.current = { y: 0, active: false };
+    const dx = x2 - touchRef.current.x;
+    touchRef.current = { x: 0, active: false };
 
-    if (Math.abs(dy) < TOUCH_THRESHOLD) return;
+    if (Math.abs(dx) < TOUCH_THRESHOLD) return;
 
-    // 위로 스와이프(dy<0) => 다음, 아래로(dy>0) => 이전
-    if (dy < 0) goNextPage();
+    // 오른쪽->왼쪽(dx<0) => 다음, 왼쪽->오른쪽(dx>0) => 이전
+    if (dx < 0) goNextPage();
     else goPrevPage();
+  };
+
+  const renderCanvasLayer = (width = '100%') => {
+    if (layout.mode === 'template') {
+      return (
+        <div style={{ width }}>
+          <TemplateCanvas
+            lang={lang}
+            editing={edit}
+            uiMode={preview ? 'preview' : 'edit'}
+            panelOpen={tplPanelOpen}
+            onTogglePanel={(open) => setTplPanelOpen(open)}
+            pageHeight={PAGE_HEIGHT}
+            pageGap={PAGE_GAP}
+            fullScrollHeight={fullScrollHeight}
+            templateId={layout.templateId}
+            data={layout.templateData}
+            onChange={(nextData) => {
+              const next = { ...layout, mode: 'template', templateData: nextData };
+              setLayout(next);
+              saveJson(KEYS.MENU_LAYOUT, next);
+            }}
+            onCancel={() => {
+              setPreview(false);
+              setEdit(false);
+              hideEditButton();
+              setPageIndex(1);
+              setTimeout(() => hardResetScrollTop('auto'), 0);
+            }}
+          />
+        </div>
+      );
+    }
+
+    if (layout.mode === 'custom') {
+      return (
+        <div style={{ width }}>
+          <CustomCanvas
+            lang={lang}
+            inspectorTop={118}
+            items={layout.items}
+            editing={edit}
+            uiMode={preview ? 'preview' : 'edit'}
+            scrollRef={stageScrollRef}
+            onChangeItems={(items) => {
+              const next = { ...layout, mode: 'custom', items };
+              setLayout(next);
+            }}
+            onSave={(items) => {
+              const next = { ...layout, mode: 'custom', items };
+              setLayout(next);
+              saveJson(KEYS.MENU_LAYOUT, next);
+
+              setPreview(false);
+              setEdit(false);
+              hideEditButton();
+              setPageIndex(1);
+              setTimeout(() => hardResetScrollTop('auto'), 0);
+            }}
+            onCancel={() => {
+              setPreview(false);
+              setEdit(false);
+              hideEditButton();
+              setPageIndex(1);
+              setTimeout(() => hardResetScrollTop('auto'), 0);
+            }}
+          />
+        </div>
+      );
+    }
+
+    return null;
+  };
+
+  const renderViewPages = () => {
+    const pageWidthScaled = PAGE_WIDTH * effectiveScale;
+    const pageHeightScaled = PAGE_HEIGHT * effectiveScale;
+    const pageGapPx = PAGE_GAP * effectiveScale;
+
+    return (
+      <div
+        ref={stageScrollRef}
+        style={{
+          ...styles.stage,
+          overflowY: 'hidden',
+          touchAction: 'none',
+        }}
+        onWheel={onWheel}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+      >
+        <div style={styles.viewTrackWrap}>
+          <div
+            style={{
+              ...styles.viewTrack,
+              gap: pageGapPx,
+              transform: `translate3d(${viewTranslateX}px, 0, 0)`,
+              transition: `transform ${TURN_ANIM_MS}ms cubic-bezier(0.25, 0.8, 0.4, 1)`,
+            }}
+          >
+            {Array.from({ length: totalPages }).map((_, i) => {
+              const pageNum = i + 1;
+              const pageOffset = (pageNum - 1) * (PAGE_HEIGHT + PAGE_GAP);
+              const tilt = pageNum === pageIndex ? 0 : pageNum < pageIndex ? -4 : 4;
+
+              return (
+                <div
+                  key={pageNum}
+                  style={{
+                    ...styles.viewPageFrame,
+                    width: pageWidthScaled,
+                    height: pageHeightScaled,
+                  }}
+                >
+                  <div
+                    style={{
+                      ...styles.viewPageSurface,
+                      transform: `rotateY(${tilt}deg)`,
+                      transition: `transform ${TURN_ANIM_MS}ms ease, box-shadow ${TURN_ANIM_MS}ms ease`,
+                      boxShadow:
+                        pageNum === pageIndex
+                          ? '0 20px 60px rgba(0,0,0,0.35)'
+                          : '0 10px 36px rgba(0,0,0,0.28)',
+                    }}
+                  >
+                    <div
+                      style={{
+                        ...styles.viewPageBg,
+                        backgroundImage: `url(${getPageBgUrl(pageNum)})`,
+                        height: pageHeightScaled,
+                      }}
+                    />
+
+                    <div style={{ ...styles.viewPageMask, height: pageHeightScaled }}>
+                      <div
+                        style={{
+                          transform: `scale(${effectiveScale}) translateY(-${pageOffset}px)`,
+                          transformOrigin: 'top left',
+                          width: PAGE_WIDTH,
+                        }}
+                      >
+                        {renderCanvasLayer(`${PAGE_WIDTH}px`)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
   };
 
   const langWrapStyle = edit ? styles.langWrapEdit : styles.langWrapView;
@@ -990,14 +1154,16 @@ export default function MenuEditor() {
             <div style={styles.smallNote}>{T.keep}</div>
           </div>
         </div>
+      ) : pageTurnEnabled ? (
+        renderViewPages()
       ) : (
         <div
           ref={stageScrollRef}
           style={{
             ...styles.stage,
-            overflowY: pageTurnEnabled ? 'hidden' : 'auto',
-            WebkitOverflowScrolling: pageTurnEnabled ? 'auto' : 'touch',
-            touchAction: pageTurnEnabled ? 'none' : 'pan-y',
+            overflowY: 'auto',
+            WebkitOverflowScrolling: 'touch',
+            touchAction: 'pan-y',
           }}
           onWheel={onWheel}
           onTouchStart={onTouchStart}
@@ -1005,22 +1171,13 @@ export default function MenuEditor() {
           onTouchEnd={onTouchEnd}
         >
           {/* ✅ mover: 보기모드에서만 translate, 편집/미리보기는 none */}
-          <div
-            style={{
-              ...styles.viewportMover,
-              transform: pageTurnEnabled ? `translate3d(0, ${viewTranslateY}px, 0)` : 'none',
-              transition: pageTurnEnabled ? `transform ${TURN_ANIM_MS}ms ease` : 'none',
-              willChange: pageTurnEnabled ? 'transform' : 'auto',
-            }}
-          >
+          <div style={styles.viewportMover}>
             {/* ✅ content wrapper: 보기모드에서만 scale, 편집/미리보기는 1:1 크게 */}
             <div
               style={{
                 ...styles.page,
                 height: fullScrollHeight,
-                width: pageTurnEnabled ? `${100 / effectiveScale}%` : '100%',
-                transform: pageTurnEnabled ? `scale(${effectiveScale})` : 'none',
-                transformOrigin: 'top left',
+                width: '100%',
               }}
             >
               {renderBgPages()}
@@ -1708,6 +1865,61 @@ const styles = {
   viewportMover: {
     position: 'relative',
     width: '100%',
+  },
+
+  viewTrackWrap: {
+    position: 'relative',
+    width: '100%',
+    height: '100%',
+    overflow: 'hidden',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  viewTrack: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+    height: '100%',
+  },
+
+  viewPageFrame: {
+    position: 'relative',
+    flex: '0 0 auto',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    perspective: 1600,
+  },
+
+  viewPageSurface: {
+    position: 'relative',
+    width: '100%',
+    height: '100%',
+    borderRadius: 24,
+    overflow: 'hidden',
+    background: '#000',
+    transformStyle: 'preserve-3d',
+    backfaceVisibility: 'hidden',
+  },
+
+  viewPageBg: {
+    position: 'absolute',
+    inset: 0,
+    backgroundRepeat: 'no-repeat',
+    backgroundPosition: 'top center',
+    backgroundSize: '100% 100%',
+    zIndex: 1,
+    filter: 'drop-shadow(0 10px 24px rgba(0,0,0,0.25))',
+  },
+
+  viewPageMask: {
+    position: 'relative',
+    zIndex: 2,
+    overflow: 'hidden',
+    width: '100%',
+    borderRadius: 24,
   },
 
   page: {
