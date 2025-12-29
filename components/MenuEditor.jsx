@@ -281,7 +281,6 @@ export default function MenuEditor() {
 
   // ✅ viewport height (보기모드 scale용)
   const [vh, setVh] = useState(900);
-  const [vw, setVw] = useState(1080);
 
   useEffect(() => {
     const update = () => {
@@ -296,17 +295,7 @@ export default function MenuEditor() {
         .map((v) => Number(v) || 0)
         .filter(Boolean);
 
-      const widthCandidates = [
-        vv?.width,
-        window.innerWidth,
-        window.screen?.width,
-        window.screen?.availWidth,
-      ]
-        .map((v) => Number(v) || 0)
-        .filter(Boolean);
-
       setVh(heightCandidates.length ? Math.max(...heightCandidates) : 900);
-      setVw(widthCandidates.length ? Math.max(...widthCandidates) : 1080);
     };
 
     update();
@@ -1300,7 +1289,7 @@ export default function MenuEditor() {
     const pageWidthScaled = PAGE_WIDTH * effectiveScale;
     const pageHeightScaled = PAGE_HEIGHT * effectiveScale;
     const pageGapPx = PAGE_GAP * effectiveScale;
-    const viewWindowWidth = Math.min(vw || pageWidthScaled, pageWidthScaled);
+    const viewWindowWidth = pageWidthScaled;
 
     return (
       <div
@@ -1968,7 +1957,7 @@ function makeInitialTemplateData(fullId, lang) {
 }
 
 const styles = {
-  container: { width: '100vw', height: '100vh', background: '#111' },
+  container: { width: '100%', height: '100vh', background: '#111' },
 
   setupWrap: {
     width: '100%',
