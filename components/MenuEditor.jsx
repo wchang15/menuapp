@@ -281,9 +281,17 @@ export default function MenuEditor() {
 
   // ✅ viewport height (보기모드 scale용)
   const [vh, setVh] = useState(900);
+  const [vw, setVw] = useState(1080);
 
   useEffect(() => {
     const update = () => setVh(window.innerHeight || 900);
+    update();
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
+  }, []);
+
+  useEffect(() => {
+    const update = () => setVw(window.innerWidth || 1080);
     update();
     window.addEventListener('resize', update);
     return () => window.removeEventListener('resize', update);
@@ -837,6 +845,13 @@ export default function MenuEditor() {
     return -((pageIndex - 1) * (PAGE_WIDTH + PAGE_GAP) * effectiveScale);
   }, [pageIndex, effectiveScale]);
 
+  const viewSidePadding = useMemo(() => {
+    if (!pageTurnEnabled) return 0;
+    const scaledWidth = PAGE_WIDTH * effectiveScale;
+    const pad = ((vw || scaledWidth) - scaledWidth) / 2;
+    return Math.max(0, pad);
+  }, [pageTurnEnabled, vw, effectiveScale]);
+
   // ✅ pageTurnEnabled 켜질 때: 스크롤 잔상 제거
   useEffect(() => {
     if (!pageTurnEnabled) return;
@@ -1285,15 +1300,17 @@ export default function MenuEditor() {
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
       >
-        <div style={styles.viewTrackWrap}>
-          <div
-            style={{
-              ...styles.viewTrack,
-              gap: pageGapPx,
-              transform: `translate3d(${viewTranslateX}px, 0, 0)`,
-              transition: `transform ${TURN_ANIM_MS}ms cubic-bezier(0.25, 0.8, 0.4, 1)`,
-            }}
-          >
+            <div style={styles.viewTrackWrap}>
+              <div
+                style={{
+                  ...styles.viewTrack,
+                  gap: pageGapPx,
+                  paddingLeft: viewSidePadding,
+                  paddingRight: viewSidePadding,
+                  transform: `translate3d(${viewTranslateX}px, 0, 0)`,
+                  transition: `transform ${TURN_ANIM_MS}ms cubic-bezier(0.25, 0.8, 0.4, 1)`,
+                }}
+              >
             {Array.from({ length: totalPages }).map((_, i) => {
               const pageNum = i + 1;
               const pageOffset = (pageNum - 1) * (PAGE_HEIGHT + PAGE_GAP);
@@ -1996,7 +2013,7 @@ const styles = {
     overflow: 'hidden',
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
   },
 
   viewTrack: {
