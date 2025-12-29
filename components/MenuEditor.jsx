@@ -851,9 +851,11 @@ export default function MenuEditor() {
 
   // ✅ 보기모드 스케일(화면 높이에 맞추기) / 편집&미리보기는 1:1(크게)
   const viewScale = useMemo(() => {
-    const s = (vh || 900) / PAGE_HEIGHT;
+    const heightScale = (vh || 900) / PAGE_HEIGHT;
+    const widthScale = (vw || PAGE_WIDTH) / PAGE_WIDTH;
+    const s = Math.min(heightScale, widthScale);
     return Math.max(0.25, Math.min(1, s));
-  }, [vh]);
+  }, [vh, vw]);
 
   const effectiveScale = useMemo(() => {
     return pageTurnEnabled ? viewScale : 1;
@@ -1301,6 +1303,7 @@ export default function MenuEditor() {
     const pageHeightScaled = PAGE_HEIGHT * effectiveScale;
     const pageGapPx = PAGE_GAP * effectiveScale;
     const viewWindowWidth = Math.min(vw || pageWidthScaled, pageWidthScaled);
+    const stageBg = getPageBgUrl(pageIndex);
 
     return (
       <div
@@ -1310,6 +1313,9 @@ export default function MenuEditor() {
           ...styles.viewNoSelect,
           overflowY: 'hidden',
           touchAction: 'none',
+          backgroundImage: stageBg ? `url(${stageBg})` : undefined,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center center',
         }}
         onWheel={onWheel}
         onTouchStart={onTouchStart}
@@ -2012,7 +2018,7 @@ const styles = {
     width: '100%',
     height: '100%',
     overflowX: 'hidden',
-    background: '#000',
+    background: '#f3f3f3',
   },
 
   viewNoSelect: {
@@ -2034,7 +2040,7 @@ const styles = {
     overflow: 'hidden',
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'flex-start',
+    justifyContent: 'center',
   },
 
   viewTrack: {
