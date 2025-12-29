@@ -1212,6 +1212,7 @@ export default function MenuEditor() {
   );
 
   const langWrapStyle = edit ? styles.langWrapEdit : styles.langWrapView;
+  const langRowStyle = edit ? styles.langRowEdit : styles.langRowView;
   const langBtnStyle = edit ? styles.langBtn : styles.langBtnView;
   const langBtnActiveStyle = edit ? styles.langBtnActive : styles.langBtnActiveView;
 
@@ -1225,6 +1226,7 @@ export default function MenuEditor() {
         ref={stageScrollRef}
         style={{
           ...styles.stage,
+          ...styles.viewNoSelect,
           overflowY: 'hidden',
           touchAction: 'none',
         }}
@@ -1303,22 +1305,36 @@ export default function MenuEditor() {
       <>
         {!isOverlayOpen && (
           <div style={langWrapStyle}>
-            <button
-              style={{ ...langBtnStyle, ...(lang === 'en' ? langBtnActiveStyle : {}) }}
-              onClick={() => setLanguage('en')}
-              aria-label="English"
-              title="English"
-            >
-              🇺🇸
-            </button>
-            <button
-              style={{ ...langBtnStyle, ...(lang === 'ko' ? langBtnActiveStyle : {}) }}
-              onClick={() => setLanguage('ko')}
-              aria-label="Korean"
-              title="한국어"
-            >
-              🇰🇷
-            </button>
+            <div style={langRowStyle}>
+              <button
+                style={{ ...langBtnStyle, ...(lang === 'en' ? langBtnActiveStyle : {}) }}
+                onClick={() => setLanguage('en')}
+                aria-label="English"
+                title="English"
+              >
+                🇺🇸
+              </button>
+              <button
+                style={{ ...langBtnStyle, ...(lang === 'ko' ? langBtnActiveStyle : {}) }}
+                onClick={() => setLanguage('ko')}
+                aria-label="Korean"
+                title="한국어"
+              >
+                🇰🇷
+              </button>
+            </div>
+
+            {!edit && showEditBtn && (
+              <button
+                style={styles.editBtn}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  requestEdit();
+                }}
+              >
+                {T.edit}
+              </button>
+            )}
           </div>
         )}
 
@@ -1340,18 +1356,6 @@ export default function MenuEditor() {
             onTouchCancel={cancelLongPress}
             aria-label="secret-edit-hotspot"
           />
-        )}
-
-        {!edit && showEditBtn && !isOverlayOpen && (
-          <button
-            style={styles.editBtn}
-            onClick={(e) => {
-              e.stopPropagation();
-              requestEdit();
-            }}
-          >
-            {T.edit}
-          </button>
         )}
 
         {!isOverlayOpen && !edit && (
@@ -1416,6 +1420,7 @@ export default function MenuEditor() {
           ref={stageScrollRef}
           style={{
             ...styles.stage,
+            ...styles.viewNoSelect,
             overflowY: 'auto',
             WebkitOverflowScrolling: 'touch',
             touchAction: 'pan-y',
@@ -1922,6 +1927,13 @@ const styles = {
     background: '#000',
   },
 
+  viewNoSelect: {
+    userSelect: 'none',
+    WebkitUserSelect: 'none',
+    WebkitTouchCallout: 'none',
+    WebkitTapHighlightColor: 'transparent',
+  },
+
   viewportMover: {
     position: 'relative',
     width: '100%',
@@ -2001,21 +2013,35 @@ const styles = {
 
   langWrapEdit: {
     position: 'fixed',
-    top: 'calc(env(safe-area-inset-top, 0px) + 28px)',
+    top: 'calc(env(safe-area-inset-top, 0px) + 18px)',
     right: 16,
     zIndex: 99999,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8,
+    alignItems: 'flex-end',
+  },
+
+  langWrapView: {
+    position: 'fixed',
+    top: 'calc(env(safe-area-inset-top, 0px) + 20px)',
+    right: 'calc(env(safe-area-inset-right, 0px) + 20px)',
+    zIndex: 99999,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 10,
+    alignItems: 'flex-end',
+  },
+
+  langRowEdit: {
     display: 'flex',
     gap: 8,
     alignItems: 'center',
   },
 
-  langWrapView: {
-    position: 'fixed',
-    top: 'calc(env(safe-area-inset-top, 0px) + 110px)',
-    right: 'calc(env(safe-area-inset-right, 0px) + 20px)',
-    zIndex: 99999,
+  langRowView: {
     display: 'flex',
-    gap: 16,
+    gap: 12,
     alignItems: 'center',
   },
 
@@ -2111,15 +2137,16 @@ const styles = {
   },
 
   editBtn: {
-    position: 'fixed',
-    top: 58,
-    right: 16,
+    alignSelf: 'flex-end',
     padding: '10px 14px',
     borderRadius: 12,
-    border: 'none',
+    border: '1px solid rgba(255,255,255,0.35)',
     cursor: 'pointer',
     fontWeight: 900,
-    zIndex: 999999,
+    background: 'rgba(0,0,0,0.7)',
+    color: '#fff',
+    boxShadow: '0 8px 20px rgba(0,0,0,0.4)',
+    minWidth: 88,
   },
 
   pageCtrl: {
