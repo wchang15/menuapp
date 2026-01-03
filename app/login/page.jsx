@@ -6,6 +6,10 @@ export default function LoginPage() {
   const router = useRouter();
   const [form, setForm] = useState({ id: '', password: '' });
 
+  const fillDemoAccount = () => {
+    setForm({ id: 'test', password: 'test1' });
+  };
+
   const handleChange = (event) => {
     const { name, value } = event.target;
     setForm((prev) => ({ ...prev, [name]: value }));
@@ -148,6 +152,43 @@ export default function LoginPage() {
             로그인
           </button>
         </form>
+
+        <div
+          style={{
+            marginTop: '12px',
+            padding: '12px 14px',
+            borderRadius: '10px',
+            background: 'rgba(92, 225, 230, 0.08)',
+            border: '1px solid rgba(92, 225, 230, 0.25)',
+            color: '#d8f7ff',
+            fontSize: '14px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '6px',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
+            <div>
+              <strong style={{ display: 'block', marginBottom: '4px' }}>데모 계정</strong>
+              <span style={{ color: '#b3e7f3' }}>아이디: test / 비밀번호: test1</span>
+            </div>
+            <button
+              type="button"
+              onClick={fillDemoAccount}
+              style={{
+                padding: '8px 12px',
+                borderRadius: '8px',
+                border: '1px solid rgba(92, 225, 230, 0.4)',
+                background: 'rgba(92, 225, 230, 0.15)',
+                color: '#0a0c12',
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              자동 입력
+            </button>
+          </div>
+        </div>
 
         <div
           style={{
