@@ -3,7 +3,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { KEYS, loadBlob, saveBlob, loadJson, saveJson } from '@/lib/storage';
+import { KEYS, loadBlob, saveBlob, loadJson, saveJson, userScopedKey } from '@/lib/storage';
+import { getCurrentUser, logoutUser } from '@/lib/auth';
 import CustomCanvas from './CustomCanvas';
 import TemplateCanvas from './TemplateCanvas';
 
@@ -39,7 +40,7 @@ const MAX_PHOTOS = 8;
 // ✅✅ 페이지별 배경 오버라이드 저장 키
 const BG_OVERRIDES_KEY = 'MENU_BG_OVERRIDES_V1';
 // 각 페이지 blob 키: `${KEYS.MENU_BG}__P${page}`
-const bgPageKey = (page) => `${KEYS.MENU_BG}__P${page}`;
+const bgPageKey = (page, userId) => userScopedKey(userId, `${KEYS.MENU_BG}__P${page}`);
 
 // ✅ 보기모드 페이지 전환 튜닝
 const TURN_ANIM_MS = 320;
@@ -210,6 +211,9 @@ const tpBtn = {
 export default function MenuEditor() {
   const router = useRouter();
 
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
   // ✅ 기본 배경(전체 페이지 default)
   const [bgBlob, setBgBlob] = useState(null);
 
@@ -283,6 +287,27 @@ export default function MenuEditor() {
   // ✅ viewport height (보기모드 scale용)
   const [vh, setVh] = useState(900);
 
+  const userId = currentUser?.username;
+  const scopedKey = useMemo(() => (key) => userScopedKey(userId, key), [userId]);
+
+  useEffect(() => {
+    (async () => {
+      const user = await getCurrentUser();
+      if (!user) {
+        router.replace('/login');
+        return;
+      }
+      setCurrentUser(user);
+      setAuthLoading(false);
+    })();
+  }, [router]);
+
+  useEffect(() => {
+    setBgBlob(null);
+    setBgOverrides({});
+    setLayout(DEFAULT_LAYOUT);
+  }, [userId]);
+
   useEffect(() => {
     const update = () => {
       const vv = typeof window !== 'undefined' ? window.visualViewport : null;
@@ -307,7 +332,7 @@ export default function MenuEditor() {
       window.removeEventListener('resize', update);
       if (window.visualViewport) window.visualViewport.removeEventListener('resize', update);
     };
-  }, []);
+  }, [scopedKey, userId]);
 
   // ✅ (핵심) 스크롤을 확실히 0으로 리셋하는 함수
   const hardResetScrollTop = (behavior = 'auto') => {
@@ -317,10 +342,12 @@ export default function MenuEditor() {
   };
 
   useEffect(() => {
+    if (!userId) return;
     (async () => {
       try {
-        const bg = await loadBlob(KEYS.MENU_BG);
-        const lay = (await loadJson(KEYS.MENU_LAYOUT)) || DEFAULT_LAYOUT;
+        setLoading(true);
+        const bg = await loadBlob(scopedKey(KEYS.MENU_BG));
+        const lay = (await loadJson(scopedKey(KEYS.MENU_LAYOUT))) || DEFAULT_LAYOUT;
         if (bg) setBgBlob(bg);
 
         const safeLay = {
@@ -332,16 +359,16 @@ export default function MenuEditor() {
 
         // ✅ 페이지별 배경 오버라이드 로드
         try {
-          const overrides = (await loadJson(BG_OVERRIDES_KEY)) || {};
-          const pages = Object.keys(overrides || {});
-          const map = {};
-          for (const p of pages) {
-            const pn = Number(p);
-            if (!Number.isFinite(pn) || pn < 1) continue;
-            const blob = await loadBlob(bgPageKey(pn));
-            if (blob) map[pn] = blob;
-          }
-          setBgOverrides(map);
+            const overrides = (await loadJson(scopedKey(BG_OVERRIDES_KEY))) || {};
+            const pages = Object.keys(overrides || {});
+            const map = {};
+            for (const p of pages) {
+              const pn = Number(p);
+              if (!Number.isFinite(pn) || pn < 1) continue;
+              const blob = await loadBlob(bgPageKey(pn, userId));
+              if (blob) map[pn] = blob;
+            }
+            setBgOverrides(map);
         } catch {}
 
       // ✅ 로드 직후 스크롤 잔상 방지
@@ -444,6 +471,16 @@ export default function MenuEditor() {
   // ✅ 영상으로 돌아가기
   const goIntro = () => router.push('/intro');
 
+  const logout = async () => {
+    await logoutUser();
+    router.replace('/login');
+  };
+
+  const persistLayout = async (next) => {
+    if (!userId) return;
+    await saveJson(scopedKey(KEYS.MENU_LAYOUT), next);
+  };
+
   // ✅ 기본 배경 URL
   const bgUrl = useMemo(() => {
     if (!bgBlob) return null;
@@ -479,8 +516,8 @@ export default function MenuEditor() {
   }, [bgUrl]);
 
   const uploadBg = async (file) => {
-    if (!file) return;
-    await saveBlob(KEYS.MENU_BG, file);
+    if (!file || !userId) return;
+    await saveBlob(scopedKey(KEYS.MENU_BG), file);
     setBgBlob(file);
     // ✅ 업로드 즉시 맨위로
     setTimeout(() => hardResetScrollTop('auto'), 0);
@@ -489,19 +526,19 @@ export default function MenuEditor() {
   // ✅ 페이지 배경 업로드(현재 pageIndex)
   const uploadPageBg = async (file, pageNum) => {
     const p = Number(pageNum);
-    if (!file || !Number.isFinite(p) || p < 1) return;
+    if (!file || !Number.isFinite(p) || p < 1 || !userId) return;
 
-    await saveBlob(bgPageKey(p), file);
+    await saveBlob(bgPageKey(p, userId), file);
     setBgOverrides((prev) => ({ ...(prev || {}), [p]: file }));
 
     // overrides 인덱스 저장
     try {
-      const nextIndex = { ...(await loadJson(BG_OVERRIDES_KEY)) };
+      const nextIndex = { ...(await loadJson(scopedKey(BG_OVERRIDES_KEY))) };
       nextIndex[p] = true;
-      await saveJson(BG_OVERRIDES_KEY, nextIndex);
+      await saveJson(scopedKey(BG_OVERRIDES_KEY), nextIndex);
     } catch {
       try {
-        await saveJson(BG_OVERRIDES_KEY, { [p]: true });
+        await saveJson(scopedKey(BG_OVERRIDES_KEY), { [p]: true });
       } catch {}
     }
   };
@@ -509,7 +546,7 @@ export default function MenuEditor() {
   // ✅ 페이지 배경 오버라이드 해제(기본 배경으로 돌아감)
   const clearPageBgOverride = async (pageNum) => {
     const p = Number(pageNum);
-    if (!Number.isFinite(p) || p < 1) return;
+    if (!Number.isFinite(p) || p < 1 || !userId) return;
 
     setBgOverrides((prev) => {
       const next = { ...(prev || {}) };
@@ -518,10 +555,10 @@ export default function MenuEditor() {
     });
 
     try {
-      const idx = (await loadJson(BG_OVERRIDES_KEY)) || {};
+      const idx = (await loadJson(scopedKey(BG_OVERRIDES_KEY))) || {};
       const nextIdx = { ...(idx || {}) };
       delete nextIdx[p];
-      await saveJson(BG_OVERRIDES_KEY, nextIdx);
+      await saveJson(scopedKey(BG_OVERRIDES_KEY), nextIdx);
     } catch {}
   };
 
@@ -905,7 +942,7 @@ export default function MenuEditor() {
   const handleSaveAll = async () => {
     const next = { ...layout };
     setLayout(next);
-    await saveJson(KEYS.MENU_LAYOUT, next);
+    await persistLayout(next);
 
     setPreview(false);
     setEdit(false);
@@ -1039,7 +1076,7 @@ export default function MenuEditor() {
             onChange={(nextData) => {
               const next = { ...layout, mode: 'template', templateData: nextData };
               setLayout(next);
-              saveJson(KEYS.MENU_LAYOUT, next);
+              persistLayout(next);
             }}
             onCancel={() => {
               setPreview(false);
@@ -1070,7 +1107,7 @@ export default function MenuEditor() {
             onSave={(items) => {
               const next = { ...layout, mode: 'custom', items };
               setLayout(next);
-              saveJson(KEYS.MENU_LAYOUT, next);
+              persistLayout(next);
 
               setPreview(false);
               setEdit(false);
@@ -1245,7 +1282,7 @@ export default function MenuEditor() {
                   const next = { mode: 'template', templateId: fullId, templateData: data, items: [] };
 
                   setLayout(next);
-                  saveJson(KEYS.MENU_LAYOUT, next);
+                  persistLayout(next);
                   setEdit(true);
                   setPreview(false);
                   setPageIndex(1);
@@ -1260,7 +1297,7 @@ export default function MenuEditor() {
                 onClick={() => {
                   const next = { ...layout, mode: 'custom', templateId: null, templateData: null };
                   setLayout(next);
-                  saveJson(KEYS.MENU_LAYOUT, next);
+                  persistLayout(next);
                   setEditModeModalOpen(false);
                   setEdit(true);
                   setPreview(false);
@@ -1445,19 +1482,29 @@ export default function MenuEditor() {
     );
   };
 
-  return (
-    <div style={styles.container}>
-      {loading ? null : !bgUrl ? (
-        <div style={styles.setupWrap}>
-          <div style={styles.setupCard}>
-            <div style={styles.title}>{T.pickBgTitle}</div>
-            <div style={styles.desc}>
-              {T.pickBgDesc1}
-              <b>{T.pickBgDesc2}</b>
-              {T.pickBgDesc3}
-              <br />
-              {T.pickBgDesc4}
-            </div>
+    if (authLoading) return null;
+
+    return (
+      <div style={styles.container}>
+        <div style={styles.authBar}>
+          <div style={styles.authText}>
+            {userId ? `${currentUser?.name || userId} 님의 메뉴와 배경이 불러와집니다.` : ''}
+          </div>
+          <button style={styles.logoutMiniBtn} onClick={logout}>
+            로그아웃
+          </button>
+        </div>
+        {loading ? null : !bgUrl ? (
+          <div style={styles.setupWrap}>
+            <div style={styles.setupCard}>
+              <div style={styles.title}>{T.pickBgTitle}</div>
+              <div style={styles.desc}>
+                {T.pickBgDesc1}
+                <b>{T.pickBgDesc2}</b>
+                {T.pickBgDesc3}
+                <br />
+                {T.pickBgDesc4}
+              </div>
 
             <div
               style={{ ...styles.dropZone, ...(dragOver ? styles.dropZoneActive : {}) }}
@@ -1478,6 +1525,10 @@ export default function MenuEditor() {
                 <span style={styles.linkLike}>{T.drop2}</span> {T.drop3}
               </div>
               <div style={styles.hint}>{T.hint}</div>
+            </div>
+
+            <div style={{ marginTop: 10, fontWeight: 800 }}>
+              첫 로그인이라면 준비해 둔 배경 이미지를 올려주세요. 계정별로 따로 저장됩니다.
             </div>
 
             <input
@@ -1692,7 +1743,7 @@ export default function MenuEditor() {
                   onChange={(nextData) => {
                     const next = { ...layout, mode: 'template', templateData: nextData };
                     setLayout(next);
-                    saveJson(KEYS.MENU_LAYOUT, next);
+                    persistLayout(next);
                   }}
                   onCancel={() => {
                     setPreview(false);
@@ -1720,7 +1771,7 @@ export default function MenuEditor() {
                   onSave={(items) => {
                     const next = { ...layout, mode: 'custom', items };
                     setLayout(next);
-                    saveJson(KEYS.MENU_LAYOUT, next);
+                    persistLayout(next);
 
                     setPreview(false);
                     setEdit(false);
@@ -1766,7 +1817,7 @@ export default function MenuEditor() {
                           items: [],
                         };
                         setLayout(next);
-                        saveJson(KEYS.MENU_LAYOUT, next);
+                        persistLayout(next);
 
                         setEdit(true);
                         setPreview(false);
@@ -1783,7 +1834,7 @@ export default function MenuEditor() {
                       onClick={() => {
                         const next = { ...layout, mode: 'custom', templateId: null, templateData: null };
                         setLayout(next);
-                        saveJson(KEYS.MENU_LAYOUT, next);
+                        persistLayout(next);
                         setEdit(true);
                         setPreview(false);
                         setPageIndex(1);
@@ -1828,7 +1879,7 @@ export default function MenuEditor() {
                           items: [],
                         };
                         setLayout(next);
-                        saveJson(KEYS.MENU_LAYOUT, next);
+                        persistLayout(next);
                         setEditModeModalOpen(false);
                         setEdit(true);
                         setPreview(false);
@@ -1845,7 +1896,7 @@ export default function MenuEditor() {
                       onClick={() => {
                         const next = { ...layout, mode: 'custom', templateId: null, templateData: null };
                         setLayout(next);
-                        saveJson(KEYS.MENU_LAYOUT, next);
+                        persistLayout(next);
                         setEditModeModalOpen(false);
                         setEdit(true);
                         setPreview(false);
@@ -1957,8 +2008,36 @@ function makeInitialTemplateData(fullId, lang) {
   };
 }
 
-const styles = {
-  container: { width: '100%', height: '100vh', background: '#111' },
+  const styles = {
+    container: { width: '100%', height: '100vh', background: '#111' },
+    authBar: {
+      position: 'fixed',
+      top: 12,
+      right: 12,
+      zIndex: 999,
+      display: 'flex',
+      gap: 10,
+      alignItems: 'center',
+      background: 'rgba(0,0,0,0.6)',
+      color: '#fff',
+      padding: '10px 12px',
+      borderRadius: 12,
+      border: '1px solid rgba(255,255,255,0.1)',
+      boxShadow: '0 10px 30px rgba(0,0,0,0.35)',
+    },
+    authText: {
+      fontWeight: 800,
+      fontSize: 13,
+    },
+    logoutMiniBtn: {
+      padding: '8px 12px',
+      borderRadius: 999,
+      border: 'none',
+      cursor: 'pointer',
+      background: 'rgba(255,80,80,0.9)',
+      color: '#fff',
+      fontWeight: 800,
+    },
 
   setupWrap: {
     width: '100%',
