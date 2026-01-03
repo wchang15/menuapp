@@ -19,6 +19,12 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  const fillDemo = () => {
+    setMode('login');
+    setForm({ username: 'demo', password: 'demo1234', name: '', email: '' });
+    setMessage('테스트용 데모 계정 정보가 입력되었습니다. 바로 로그인해 보세요.');
+  };
+
   useEffect(() => {
     (async () => {
       const current = await getCurrentUser();
@@ -199,6 +205,12 @@ export default function LoginPage() {
           인트로 영상과 메뉴 보드는 로그인한 계정의 설정으로 불러옵니다.
         </div>
 
+        <div style={styles.demoBox}>
+          <div style={{ fontWeight: 800, marginBottom: 6 }}>테스트용 데모 계정</div>
+          <div style={{ fontSize: 13, color: '#b8c7d9' }}>아이디 demo / 비밀번호 demo1234</div>
+          <button style={styles.secondaryBtn} onClick={fillDemo}>자동 입력</button>
+        </div>
+
         {renderFields()}
 
         {error ? <div style={styles.error}>{error}</div> : null}
@@ -236,12 +248,13 @@ const styles = {
   wrapper: {
     width: '100vw',
     height: '100vh',
-    background: 'linear-gradient(135deg, #0d1117, #111826)',
+    background: 'rgba(6,9,16,0.92)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 16,
     color: '#e6edf3',
+    overflow: 'hidden',
   },
   card: {
     width: '100%',
@@ -307,6 +320,17 @@ const styles = {
     fontWeight: 800,
     cursor: 'pointer',
   },
+  secondaryBtn: {
+    marginTop: 8,
+    padding: '10px 12px',
+    borderRadius: 10,
+    border: '1px solid rgba(255,255,255,0.2)',
+    background: 'rgba(255,255,255,0.08)',
+    color: '#e6edf3',
+    fontWeight: 800,
+    cursor: 'pointer',
+    width: '100%',
+  },
   linkBtn: {
     background: 'transparent',
     border: 'none',
@@ -341,5 +365,14 @@ const styles = {
     fontSize: 12,
     color: '#9fb3c8',
     lineHeight: 1.4,
+  },
+  demoBox: {
+    display: 'grid',
+    gap: 6,
+    padding: '12px 14px',
+    borderRadius: 12,
+    border: '1px solid rgba(255,255,255,0.12)',
+    background: 'rgba(255,255,255,0.06)',
+    marginBottom: 10,
   },
 };
